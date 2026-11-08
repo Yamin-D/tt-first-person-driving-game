@@ -44,19 +44,23 @@ module steering_wheel #(parameter FULL = 0) (
         wire [7:0] ty = !tilted ? 8'd0 : w[0] ? {{2{dy[7]}}, dy[7:2]} : {dy[7], dy[7:1]};
         wire [7:0] sh = dy + (tx ^ {8{positive}});          // across spoke
         wire [7:0] sv = dx + (ty ^ {8{negative}});          // lower spoke
-        wire sp_h = (sh[7:3] == 5'd0) | (sh[7:3] == 5'b11111);
-        wire sp_v = ((sv[7:3] == 5'd0) | (sv[7:3] == 5'b11111)) & ~dy[7];
 
         reg [6:0] a_q;
         reg [7:0] s_q;
-        reg       on_q, mark_q, spoke_q;
+        reg [4:0] sh_q, sv_q;
+        reg       on_q, mark_q;
         always @(posedge clk) begin
             a_q     <= a;
             s_q     <= s;
             on_q    <= on;
             mark_q  <= mark_at;
-            spoke_q <= sp_h | sp_v;
+            sh_q    <= sh[7:3];
+            sv_q    <= sv[7:3];
         end
+
+        wire sp_h = (sh_q == 5'd0) | (sh_q == 5'b11111);
+        wire sp_v = ((sv_q == 5'd0) | (sv_q == 5'b11111)) & ~dy[7];
+        wire spoke_q = sp_h | sp_v;
 
         // a, b < 128 from their widths
         wire in_out = (s_q < 8'd181);

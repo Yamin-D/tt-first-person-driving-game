@@ -599,14 +599,15 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     output reg         [5:0]  rgb
 );
     // colours, RR_GG_BB
-    localparam [5:0] SKY0     = 6'b00_00_10;
-    localparam [5:0] SKY1     = 6'b00_01_10;
-    localparam [5:0] SKY2     = 6'b00_01_11;
-    localparam [5:0] SKY3     = 6'b01_10_11;
-    localparam [5:0] MOUNTAIN = 6'b01_01_10;
+    localparam [5:0] SKY0     = 6'b00_00_01;   // a sunset
+    localparam [5:0] SKY1     = 6'b01_00_10;
+    localparam [5:0] SKY2     = 6'b11_01_01;
+    localparam [5:0] SKY3     = 6'b11_10_00;
+    localparam [5:0] SKY4     = 6'b11_11_01;
+    localparam [5:0] MOUNTAIN = 6'b01_00_01;
     localparam [5:0] DASH_COL = 6'b01_01_01;
     localparam [5:0] COCKPIT  = 6'b00_00_01;
-    localparam [5:0] MIRROR   = 6'b01_10_11;
+    localparam [5:0] MIRROR   = 6'b10_10_10;
     localparam [5:0] VENT_COL = 6'b10_10_10;
     localparam [5:0] SLOW_BODY = 6'b00_01_11;
     localparam [5:0] SLOW_LAMP = 6'b11_00_00;
@@ -622,7 +623,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     localparam [5:0] KERB0    = 6'b11_11_11;
     localparam [5:0] KERB1    = 6'b11_00_00;
     localparam [5:0] GRASS0   = 6'b00_10_00;
-    localparam [5:0] GRASS1   = 6'b00_11_00;
+    localparam [5:0] GRASS1   = 6'b01_10_00;
     localparam [5:0] WHEEL0   = 6'b00_00_00;
     localparam [5:0] WHEEL1   = 6'b10_10_10;
 
@@ -749,7 +750,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     reg [2:0] inner_q;
     reg [1:0] score_q;
     reg       left_q;
-    reg       peak_q, active_q;
+    reg       peak_q, active_q, dither_q;
     always @(posedge clk) begin
         d_q      <= d;
         left_q   <= dx[10];
@@ -759,6 +760,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         inner_q  <= inner_code;
         wheel_q  <= WHEEL_FULL ? wheel_code : {1'b0, wheel_code[0]};
         peak_q   <= peak;
+        dither_q <= y[4] & (x[0] ^ y[0]);       // checkerboard in each band's lower half
         active_q <= active;
     end
 
@@ -794,9 +796,10 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
             rgb = VENT_COL;
         else if (sky)
             rgb = peak_q ? MOUNTAIN :
-                  (y_q[6:5] == 2'd0) ? SKY0 :
-                  (y_q[6:5] == 2'd1) ? SKY1 :
-                  (y_q[6:5] == 2'd2) ? SKY2 : SKY3;
+                  (y_q[6:5] == 2'd0) ? (dither_q ? SKY1 : SKY0) :
+                  (y_q[6:5] == 2'd1) ? (dither_q ? SKY2 : SKY1) :
+                  (y_q[6:5] == 2'd2) ? (dither_q ? SKY3 : SKY2) :
+                                       (dither_q ? SKY4 : SKY3);
         else if (dash)
             rgb = DASH_COL;
         else if ((s_y == 8'd0) || (near_horizon && curved))
@@ -875,19 +878,23 @@ module steering_wheel #(parameter FULL = 0) (
         wire [7:0] ty = !tilted ? 8'd0 : w[0] ? {{2{dy[7]}}, dy[7:2]} : {dy[7], dy[7:1]};
         wire [7:0] sh = dy + (tx ^ {8{positive}});          // across spoke
         wire [7:0] sv = dx + (ty ^ {8{negative}});          // lower spoke
-        wire sp_h = (sh[7:3] == 5'd0) | (sh[7:3] == 5'b11111);
-        wire sp_v = ((sv[7:3] == 5'd0) | (sv[7:3] == 5'b11111)) & ~dy[7];
 
         reg [6:0] a_q;
         reg [7:0] s_q;
-        reg       on_q, mark_q, spoke_q;
+        reg [4:0] sh_q, sv_q;
+        reg       on_q, mark_q;
         always @(posedge clk) begin
             a_q     <= a;
             s_q     <= s;
             on_q    <= on;
             mark_q  <= mark_at;
-            spoke_q <= sp_h | sp_v;
+            sh_q    <= sh[7:3];
+            sv_q    <= sv[7:3];
         end
+
+        wire sp_h = (sh_q == 5'd0) | (sh_q == 5'b11111);
+        wire sp_v = ((sv_q == 5'd0) | (sv_q == 5'b11111)) & ~dy[7];
+        wire spoke_q = sp_h | sp_v;
 
         // a, b < 128 from their widths
         wire in_out = (s_q < 8'd181);

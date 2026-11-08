@@ -44,11 +44,11 @@ SEGMENTS = {0: "abcdef", 1: "bc", 2: "abdeg", 3: "abcdg", 4: "bcfg", 5: "acdfg",
 
 # RGB222 colours, written RR_GG_BB
 def c(rr, gg, bb): return (rr << 4) | (gg << 2) | bb
-SKY      = [c(0,0,2), c(0,1,2), c(0,1,3), c(1,2,3)]   # bands of 32 rows
-MOUNTAIN = c(1,1,2)
+SKY      = [c(0,0,1), c(1,0,2), c(3,1,1), c(3,2,0), c(3,3,1)]   # sunset, bands of 32 rows
+MOUNTAIN = c(1,0,1)
 DASH_COL = c(1,1,1)
 COCKPIT  = c(0,0,1)     # roof, left pillar, top of the dashboard
-MIRROR   = c(1,2,3)
+MIRROR   = c(2,2,2)
 VENT_COL = c(2,2,2)
 SLOW_BODY, SLOW_LAMP = c(0,1,3), c(3,0,0)
 ONC_BODY,  ONC_LAMP  = c(3,3,3), c(3,3,0)
@@ -58,7 +58,7 @@ BAR_COL  = c(3,2,0)
 LINE_COL = c(3,3,3)
 TARMAC   = (c(1,1,1), c(2,2,2))     # (stripe=0, stripe=1)
 KERB     = (c(3,3,3), c(3,0,0))
-GRASS    = (c(0,2,0), c(0,3,0))
+GRASS    = (c(0,2,0), c(1,2,0))
 WHEEL0, WHEEL1 = c(0,0,0), c(2,2,2)
 
 # ---------------------------------------------------------------- divider
@@ -347,7 +347,9 @@ def render(car):
     bases = (base_row(car, car.slow), base_row(car, car.onc))
     for y in range(H_SCREEN):
         if y < HORIZON:
-            row = np.full(W_SCREEN, SKY[y >> 5], np.uint8)
+            # the lower half of each band is a checkerboard with the next colour
+            dither = ((x ^ y) & 1) & ((y >> 4) & 1)
+            row = np.array(SKY, np.uint8)[(y >> 5) + dither]
             row[(127 - y) < mountain_h] = MOUNTAIN    # i.e. 128 - y <= height
             img[y] = row
         elif y >= DASH_TOP:
