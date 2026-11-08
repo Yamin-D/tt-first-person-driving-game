@@ -263,8 +263,11 @@ module car_state (
     wire crashing = (crash != 6'd0);
 
     // ---- traffic: one adder, slow car on step_s, oncoming car on step_o
-    wire        [11:0] z_now = step_o ? onc : slow;
-    wire signed  [5:0] delta = (step_o ? -6'sd4 : 6'sd6) - {2'b00, v[7:4]};
+    reg                sel_o;                            // a copy of step_o for the data path
+    always @(posedge clk)
+        sel_o <= step_s;
+    wire        [11:0] z_now = sel_o ? onc : slow;
+    wire signed  [5:0] delta = (sel_o ? -6'sd4 : 6'sd6) - {2'b00, v[7:4]};
     wire        [12:0] z_sum = {1'b0, z_now} + {{7{delta[5]}}, delta};
     wire               z_under = z_sum[12];              // passed: respawn
     wire               z_hold  = ~delta[5] & (z_now[11:6] == 6'b111111);
@@ -324,27 +327,30 @@ module car_state (
     wire               P_stop = at_limit(P[13:11], h[7], (h == 8'sd0) || !(k1 || k2));
     wire signed [13:0] P1    = P_stop ? P : P + dP;
 
+    // Reset reaches about 150 registers here, so each half has a local copy.
+    reg rst_car, rst_traffic;
     always @(posedge clk) begin
-        if (!rst_n) begin
+        rst_car     <= rst_n;
+        rst_traffic <= rst_n;
+    end
+
+    always @(posedge clk) begin
+        if (!rst_car) begin
             v      <= 8'd0;
             wheel  <= 3'sd0;
             h      <= 8'sd0;
             P      <= 14'sd2048;           // right lane
             D      <= 9'd0;
+            n      <= 3'd0;
             track  <= 10'd0;
             kappa  <= 4'sd0;
-            slow   <= 12'd2048;
-            onc    <= 12'd2048;
             crash  <= 6'd0;
-            tens   <= 4'd0;
-            ones   <= 4'd0;
-            step_s <= 1'b0;
-            step_o <= 1'b0;
-            step_x <= 1'b0;
-            n      <= 3'd0;
             step_k <= 1'b0;
             step_h <= 1'b0;
             step_p <= 1'b0;
+            step_s <= 1'b0;
+            step_o <= 1'b0;
+            step_x <= 1'b0;
         end else begin
             step_k <= frame & ~crashing;
             step_h <= step_k;
@@ -372,26 +378,43 @@ module car_state (
                         kappa <= (kappa < target) ? kappa + 4'sd1 : kappa - 4'sd1;
                 end
             end
-            if (step_s) begin
-                slow <= z_under ? far_s : z_next;
-                if (z_under) begin
-                    ones <= (ones == 4'd9) ? 4'd0 : ones + 4'd1;
-                    if (ones == 4'd9)
-                        tens <= (tens == 4'd9) ? 4'd0 : tens + 4'd1;
-                end
-            end
-            if (step_o)
-                onc <= z_under ? far_o : z_next;
             if (step_x & hit) begin
                 crash <= 6'd63;
                 v     <= 8'd0;
                 wheel <= 3'sd0;
                 h     <= 8'sd0;
                 P     <= 14'sd2048;
-                slow  <= far_s;
-                onc   <= far_o;
-                tens  <= 4'd0;
-                ones  <= 4'd0;
+            end
+        end
+    end
+
+    // The slow car being passed is registered, so the score counts one clock
+    // later and the adder's carry chain does not run on into it.
+    reg passed;
+    always @(posedge clk)
+        passed <= step_s & z_under;
+
+    always @(posedge clk) begin
+        if (!rst_traffic) begin
+            slow <= 12'd2048;
+            onc  <= 12'd2048;
+            tens <= 4'd0;
+            ones <= 4'd0;
+        end else begin
+            if (step_s)
+                slow <= z_under ? far_s : z_next;
+            if (step_o)
+                onc <= z_under ? far_o : z_next;
+            if (passed) begin
+                ones <= (ones == 4'd9) ? 4'd0 : ones + 4'd1;
+                if (ones == 4'd9)
+                    tens <= (tens == 4'd9) ? 4'd0 : tens + 4'd1;
+            end
+            if (step_x & hit) begin
+                slow <= far_s;
+                onc  <= far_o;
+                tens <= 4'd0;
+                ones <= 4'd0;
             end
         end
     end
@@ -590,9 +613,12 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     // ---- regions, as bit slices of y (y < 480)
     // Stage 2 works on the pixel one clock earlier, so it can use a local copy
     // of y. That takes most of the load off the y counter.
-    reg [9:0] y_q;
-    always @(posedge clk)
+    // The wheel and the digits never touch column 0, so they can use a copy too.
+    reg [9:0] y_q, y_w;
+    always @(posedge clk) begin
         y_q <= y;
+        y_w <= y;
+    end
     wire sky  = (y_q[9:7] == 3'b000);                 // y < 128
     wire dash = y_q[8] & (y_q[7] | (y_q[6] & y_q[5]));// y >= 352
     wire [7:0] s_y = {~y_q[7], y_q[6:0]};             // y - 128, valid on road rows
@@ -678,7 +704,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
 
     // ---- score, on the dashboard
     wire [1:0] score_code;
-    score_display score (.clk(clk), .v(v), .x(x), .y(y), .tens(tens), .ones(ones), .code(score_code));
+    score_display score (.clk(clk), .v(v), .x(x), .y(y_w), .tens(tens), .ones(ones), .code(score_code));
 
     // ---- static interior
     wire [2:0] inner_code;
@@ -692,7 +718,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         angle <= wheel;
     wire [1:0] wheel_code;
     steering_wheel #(.FULL(WHEEL_FULL)) steer (
-        .x(x), .y(y), .w(angle), .code(wheel_code)
+        .x(x), .y(y_w), .w(angle), .code(wheel_code)
     );
 
     // ---- stage 1 registers. Everything else used below depends only on y,

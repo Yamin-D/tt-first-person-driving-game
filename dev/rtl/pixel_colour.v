@@ -63,9 +63,12 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     // ---- regions, as bit slices of y (y < 480)
     // Stage 2 works on the pixel one clock earlier, so it can use a local copy
     // of y. That takes most of the load off the y counter.
-    reg [9:0] y_q;
-    always @(posedge clk)
+    // The wheel and the digits never touch column 0, so they can use a copy too.
+    reg [9:0] y_q, y_w;
+    always @(posedge clk) begin
         y_q <= y;
+        y_w <= y;
+    end
     wire sky  = (y_q[9:7] == 3'b000);                 // y < 128
     wire dash = y_q[8] & (y_q[7] | (y_q[6] & y_q[5]));// y >= 352
     wire [7:0] s_y = {~y_q[7], y_q[6:0]};             // y - 128, valid on road rows
@@ -151,7 +154,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
 
     // ---- score, on the dashboard
     wire [1:0] score_code;
-    score_display score (.clk(clk), .v(v), .x(x), .y(y), .tens(tens), .ones(ones), .code(score_code));
+    score_display score (.clk(clk), .v(v), .x(x), .y(y_w), .tens(tens), .ones(ones), .code(score_code));
 
     // ---- static interior
     wire [2:0] inner_code;
@@ -165,7 +168,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         angle <= wheel;
     wire [1:0] wheel_code;
     steering_wheel #(.FULL(WHEEL_FULL)) steer (
-        .x(x), .y(y), .w(angle), .code(wheel_code)
+        .x(x), .y(y_w), .w(angle), .code(wheel_code)
     );
 
     // ---- stage 1 registers. Everything else used below depends only on y,
