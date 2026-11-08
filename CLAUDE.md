@@ -12,6 +12,30 @@ It is a first-person pseudo-3D driving game drawn straight to VGA, with sound.
   pushes to and pulls from this repo; after pushing from here, he must use
   "Cool stuff > Pull from GitHub" in Vulkos before pushing from Vulkos again.
 
+## Status (8 Nov 2026)
+
+- Stage 1 pushed and green: Datasheet, Tests, Layout build (GDS, precheck,
+  gate-level test). Tiny Tapeout's own build reported no setup or hold
+  violations and about 69% utilisation at global placement on 1x1.
+- Yamin's local LibreLane run in Vulkos on 1x1: DRC, LVS and antenna clean,
+  about 80% of the core after LibreLane's additions, timing met at 40 ns.
+- Still to do by Yamin: email Vulkos the repo link (if not done) and ask
+  whether a 1x2 tile is allowed.
+
+## Yamin's machine
+
+Windows 11 on ARM64. Development runs in WSL 2 Ubuntu (Python 3.14): use apt
+for Python packages (python3-numpy, python3-pil), not pip. The repo is cloned
+at ~/tt-first-person-driving-game inside WSL. He uses Claude Code from the
+Claude desktop app's Code tab with the WSL environment selected. OpenSTA is
+not installed yet; build it from source (needs cmake, tcl-dev, swig, bison,
+flex, libeigen3-dev, zlib1g-dev, and CUDD from github.com/ivmai/cudd).
+
+## Checking on the VGA preview in Vulkos
+
+Vulkos' VGA view drives ui_in from on-screen keys that latch on and off:
+keys 0-3 are left, right, accelerate, brake. Sound comes from uio[0].
+
 ## How Yamin likes to work
 
 - Before writing code for a new feature, explain the design: the maths, the
@@ -141,6 +165,11 @@ Commit and push to main is fine: Yamin asked for direct edits.
    curvature also pushes the heading. Estimated 6,000 um^2. A cheaper
    fallback is Out Run-style per-row offsets without depth.
 3. Traffic only if there is room.
+
+Area budget: stage 1 is about 32,850 um^2 before LibreLane (59% of 1x1)
+and about 80% of the 1x1 core after it; routing needed 4 passes at that
+level, so treat about 85% as the 1x1 ceiling. A 1x2 tile roughly doubles the
+core area.
 
 Stage 1 plus both would not fit 1x1. Plan: move to a 1x2 tile (set
 `tiles: "1x2"` in info.yaml; size can change on a later push). Yamin is
