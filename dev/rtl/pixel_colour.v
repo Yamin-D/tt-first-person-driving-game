@@ -5,7 +5,7 @@
 // rgb therefore belongs to the pixel one clock earlier than (x, y); the top
 // level delays the syncs by the same clock. Per pixel there are only small
 // adders, comparators and multiplexers. rgb is {R1,R0,G1,G0,B1,B0}.
-// Layout: sky 0-127, horizon 128, road 129-383, dashboard 384-479, chosen so
+// Layout: sky 0-127, horizon 128, road 129-351, dashboard 352-479, chosen so
 // that s_y and the region tests are bit slices of y.
 `default_nettype none
 
@@ -28,7 +28,11 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     localparam [5:0] SKY2     = 6'b00_01_11;
     localparam [5:0] SKY3     = 6'b01_10_11;
     localparam [5:0] MOUNTAIN = 6'b01_01_10;
-    localparam [5:0] DASH_COL = 6'b01_00_01;
+    localparam [5:0] DASH_COL = 6'b01_01_01;
+    localparam [5:0] COCKPIT  = 6'b00_00_01;
+    localparam [5:0] MIRROR   = 6'b01_10_11;
+    localparam [5:0] POD_COL  = 6'b00_00_00;
+    localparam [5:0] VENT_COL = 6'b10_10_10;
     localparam [5:0] BAR_COL  = 6'b11_10_00;
     localparam [5:0] LINE_COL = 6'b11_11_11;
     localparam [5:0] TARMAC0  = 6'b01_01_01;
@@ -42,7 +46,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
 
     // ---- regions, as bit slices of y (y < 480)
     wire sky  = (y[9:7] == 3'b000);                 // y < 128
-    wire dash = y[8] & y[7];                        // y >= 384
+    wire dash = y[8] & (y[7] | (y[6] & y[5]));      // y >= 352
     wire [7:0] s_y = {~y[7], y[6:0]};               // y - 128, valid on road rows
 
     // ---- road geometry for this line (w = s_y)
@@ -64,7 +68,11 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     // ---- speed bar: vertical, columns 64-95, v/2 rows up from the bottom row.
     // Only used on dashboard rows, where 479 - y = 95 - y[6:0] is this slice.
     wire [6:0] up     = {~y[6] & ~y[5], ~y[6] & y[5], ~y[4:0]};
-    wire       in_bar = (x[9:5] == 5'b00010) && (up < v[7:1]);
+    wire       in_bar = (x[9:5] == 5'b00010) && (up < v[7:1]) && y[7];
+
+    // ---- static interior
+    wire [2:0] inner_code;
+    interior cockpit (.x(x), .y(y), .code(inner_code));
 
     // ---- steering wheel, drawn over everything else
     wire [1:0] wheel_code;
@@ -77,9 +85,11 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     // clock earlier (at a line change that pixel is in blanking anyway).
     reg [9:0] d_q;
     reg [1:0] wheel_q;
+    reg [2:0] inner_q;
     reg       peak_q, in_bar_q, active_q;
     always @(posedge clk) begin
         d_q      <= d;
+        inner_q  <= inner_code;
         wheel_q  <= WHEEL_FULL ? wheel_code : {1'b0, wheel_code[0]};
         peak_q   <= peak;
         in_bar_q <= in_bar;
@@ -92,6 +102,16 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
             rgb = 6'b00_00_00;
         else if (wheel_q != 2'd0)
             rgb = (wheel_q == 2'd1) ? WHEEL0 : (wheel_q == 2'd2) ? BAR_COL : WHEEL1;
+        else if (in_bar_q && dash)
+            rgb = BAR_COL;
+        else if (inner_q == 3'd1 || inner_q == 3'd3)
+            rgb = COCKPIT;
+        else if (inner_q == 3'd2)
+            rgb = MIRROR;
+        else if (inner_q == 3'd4)
+            rgb = POD_COL;
+        else if (inner_q == 3'd5)
+            rgb = VENT_COL;
         else if (sky)
             rgb = peak_q ? MOUNTAIN :
                   (y[6:5] == 2'd0) ? SKY0 :
@@ -109,6 +129,10 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
             rgb = stripe ? KERB1 : KERB0;
         else
             rgb = stripe ? GRASS1 : GRASS0;
+
+        // side window: the world, with each colour channel halved
+        if (inner_q == 3'd6 && active_q)
+            rgb = {1'b0, rgb[5], 1'b0, rgb[3], 1'b0, rgb[1]};
     end
     wire _unused = &{h[7], band[2:0], 1'b0};
 endmodule

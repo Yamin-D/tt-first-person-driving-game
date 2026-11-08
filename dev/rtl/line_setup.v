@@ -24,7 +24,7 @@ module line_setup #(
     output reg  signed [10:0] Ae
 );
     localparam [9:0] HORIZON  = 10'd128;
-    localparam [9:0] DASH_TOP = 10'd384;
+    localparam [9:0] ROAD_END = 10'd384;     // the dashboard is drawn over the last rows
 
     // ---- divider: s_y of the next line is y + 1 - 128 = y - 127 (1..255)
     // divisor for the next line, registered: y is steady for 640 clocks first
@@ -39,14 +39,14 @@ module line_setup #(
     reg a_load;                   // high at x = 640 on row 127
     reg a_add;                    // high at x = 640 on rows 128..383
     reg e_load;                   // high at x = 656, once z is ready
-    reg e_step;                   // high at x = 657..659
-    reg [1:0] e_bit;              // 0, 1, 2 while e_step is high
+    reg e_step;                   // high at x = 658..660
+    reg [1:0] e_bit;              // 0, 1, 2 at x = 657..659, one clock before e_step
     always @(posedge clk) begin
-        start  <= (x == 10'd639) && (y >= HORIZON) && (y < DASH_TOP - 10'd1);
+        start  <= (x == 10'd639) && (y >= HORIZON) && (y < ROAD_END - 10'd1);
         a_load <= (x == 10'd639) && (y == HORIZON - 10'd1);
-        a_add  <= (x == 10'd639) && (y >= HORIZON) && (y < DASH_TOP);
+        a_add  <= (x == 10'd639) && (y >= HORIZON) && (y < ROAD_END);
         e_load <= (x == 10'd655);
-        e_step <= (x >= 10'd656) && (x < 10'd659);
+        e_step <= (x >= 10'd657) && (x < 10'd660);
         e_bit  <= x[1:0];
     end
 
@@ -99,12 +99,20 @@ module line_setup #(
                        (e_bit == 2'd1) ? {5'd0, zs[10:5]} : {4'd0, zs[10:4]};
     wire        use_bit = (e_bit == 2'd0) ? mag[0] :
                           (e_bit == 2'd1) ? mag[1] : mag[2];
+    // The shifted term is registered first, so the adder starts from flip-flops:
+    // kappa arrives from far away, and the carry chain alone is a long path.
+    reg [10:0] term_q;
+    reg        use_q;
+    always @(posedge clk) begin
+        term_q <= term ^ {11{~kappa[3]}};
+        use_q  <= use_bit;
+    end
     // no reset: loaded on every line
     always @(posedge clk) begin
         if (e_load)
             Ae <= A[16:6];
-        else if (e_step & use_bit)
-            Ae <= Ae + (term ^ {11{~kappa[3]}});
+        else if (e_step & use_q)
+            Ae <= Ae + term_q;
     end
     wire _unused = &{diff[8], A[5:0], 1'b0};
 endmodule

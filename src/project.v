@@ -349,7 +349,7 @@ module line_setup #(
     output reg  signed [10:0] Ae
 );
     localparam [9:0] HORIZON  = 10'd128;
-    localparam [9:0] DASH_TOP = 10'd384;
+    localparam [9:0] ROAD_END = 10'd384;     // the dashboard is drawn over the last rows
 
     // ---- divider: s_y of the next line is y + 1 - 128 = y - 127 (1..255)
     // divisor for the next line, registered: y is steady for 640 clocks first
@@ -364,14 +364,14 @@ module line_setup #(
     reg a_load;                   // high at x = 640 on row 127
     reg a_add;                    // high at x = 640 on rows 128..383
     reg e_load;                   // high at x = 656, once z is ready
-    reg e_step;                   // high at x = 657..659
-    reg [1:0] e_bit;              // 0, 1, 2 while e_step is high
+    reg e_step;                   // high at x = 658..660
+    reg [1:0] e_bit;              // 0, 1, 2 at x = 657..659, one clock before e_step
     always @(posedge clk) begin
-        start  <= (x == 10'd639) && (y >= HORIZON) && (y < DASH_TOP - 10'd1);
+        start  <= (x == 10'd639) && (y >= HORIZON) && (y < ROAD_END - 10'd1);
         a_load <= (x == 10'd639) && (y == HORIZON - 10'd1);
-        a_add  <= (x == 10'd639) && (y >= HORIZON) && (y < DASH_TOP);
+        a_add  <= (x == 10'd639) && (y >= HORIZON) && (y < ROAD_END);
         e_load <= (x == 10'd655);
-        e_step <= (x >= 10'd656) && (x < 10'd659);
+        e_step <= (x >= 10'd657) && (x < 10'd660);
         e_bit  <= x[1:0];
     end
 
@@ -424,12 +424,20 @@ module line_setup #(
                        (e_bit == 2'd1) ? {5'd0, zs[10:5]} : {4'd0, zs[10:4]};
     wire        use_bit = (e_bit == 2'd0) ? mag[0] :
                           (e_bit == 2'd1) ? mag[1] : mag[2];
+    // The shifted term is registered first, so the adder starts from flip-flops:
+    // kappa arrives from far away, and the carry chain alone is a long path.
+    reg [10:0] term_q;
+    reg        use_q;
+    always @(posedge clk) begin
+        term_q <= term ^ {11{~kappa[3]}};
+        use_q  <= use_bit;
+    end
     // no reset: loaded on every line
     always @(posedge clk) begin
         if (e_load)
             Ae <= A[16:6];
-        else if (e_step & use_bit)
-            Ae <= Ae + (term ^ {11{~kappa[3]}});
+        else if (e_step & use_q)
+            Ae <= Ae + term_q;
     end
     wire _unused = &{diff[8], A[5:0], 1'b0};
 endmodule
@@ -444,7 +452,7 @@ endmodule
 // rgb therefore belongs to the pixel one clock earlier than (x, y); the top
 // level delays the syncs by the same clock. Per pixel there are only small
 // adders, comparators and multiplexers. rgb is {R1,R0,G1,G0,B1,B0}.
-// Layout: sky 0-127, horizon 128, road 129-383, dashboard 384-479, chosen so
+// Layout: sky 0-127, horizon 128, road 129-351, dashboard 352-479, chosen so
 // that s_y and the region tests are bit slices of y.
 
 module pixel_colour #(parameter WHEEL_FULL = 0) (
@@ -466,7 +474,11 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     localparam [5:0] SKY2     = 6'b00_01_11;
     localparam [5:0] SKY3     = 6'b01_10_11;
     localparam [5:0] MOUNTAIN = 6'b01_01_10;
-    localparam [5:0] DASH_COL = 6'b01_00_01;
+    localparam [5:0] DASH_COL = 6'b01_01_01;
+    localparam [5:0] COCKPIT  = 6'b00_00_01;
+    localparam [5:0] MIRROR   = 6'b01_10_11;
+    localparam [5:0] POD_COL  = 6'b00_00_00;
+    localparam [5:0] VENT_COL = 6'b10_10_10;
     localparam [5:0] BAR_COL  = 6'b11_10_00;
     localparam [5:0] LINE_COL = 6'b11_11_11;
     localparam [5:0] TARMAC0  = 6'b01_01_01;
@@ -480,7 +492,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
 
     // ---- regions, as bit slices of y (y < 480)
     wire sky  = (y[9:7] == 3'b000);                 // y < 128
-    wire dash = y[8] & y[7];                        // y >= 384
+    wire dash = y[8] & (y[7] | (y[6] & y[5]));      // y >= 352
     wire [7:0] s_y = {~y[7], y[6:0]};               // y - 128, valid on road rows
 
     // ---- road geometry for this line (w = s_y)
@@ -502,7 +514,11 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     // ---- speed bar: vertical, columns 64-95, v/2 rows up from the bottom row.
     // Only used on dashboard rows, where 479 - y = 95 - y[6:0] is this slice.
     wire [6:0] up     = {~y[6] & ~y[5], ~y[6] & y[5], ~y[4:0]};
-    wire       in_bar = (x[9:5] == 5'b00010) && (up < v[7:1]);
+    wire       in_bar = (x[9:5] == 5'b00010) && (up < v[7:1]) && y[7];
+
+    // ---- static interior
+    wire [2:0] inner_code;
+    interior cockpit (.x(x), .y(y), .code(inner_code));
 
     // ---- steering wheel, drawn over everything else
     wire [1:0] wheel_code;
@@ -515,9 +531,11 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     // clock earlier (at a line change that pixel is in blanking anyway).
     reg [9:0] d_q;
     reg [1:0] wheel_q;
+    reg [2:0] inner_q;
     reg       peak_q, in_bar_q, active_q;
     always @(posedge clk) begin
         d_q      <= d;
+        inner_q  <= inner_code;
         wheel_q  <= WHEEL_FULL ? wheel_code : {1'b0, wheel_code[0]};
         peak_q   <= peak;
         in_bar_q <= in_bar;
@@ -530,6 +548,16 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
             rgb = 6'b00_00_00;
         else if (wheel_q != 2'd0)
             rgb = (wheel_q == 2'd1) ? WHEEL0 : (wheel_q == 2'd2) ? BAR_COL : WHEEL1;
+        else if (in_bar_q && dash)
+            rgb = BAR_COL;
+        else if (inner_q == 3'd1 || inner_q == 3'd3)
+            rgb = COCKPIT;
+        else if (inner_q == 3'd2)
+            rgb = MIRROR;
+        else if (inner_q == 3'd4)
+            rgb = POD_COL;
+        else if (inner_q == 3'd5)
+            rgb = VENT_COL;
         else if (sky)
             rgb = peak_q ? MOUNTAIN :
                   (y[6:5] == 2'd0) ? SKY0 :
@@ -547,6 +575,10 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
             rgb = stripe ? KERB1 : KERB0;
         else
             rgb = stripe ? GRASS1 : GRASS0;
+
+        // side window: the world, with each colour channel halved
+        if (inner_q == 3'd6 && active_q)
+            rgb = {1'b0, rgb[5], 1'b0, rgb[3], 1'b0, rgb[1]};
     end
     wire _unused = &{h[7], band[2:0], 1'b0};
 endmodule
@@ -565,7 +597,7 @@ endmodule
 //
 // The centre and radius make dx and dy bit slices of the counters.
 // FULL = 0: for a 1x1 tile. Radius 64, 8 px rim, one spoke, one colour.
-// FULL = 1: for a 1x2 tile. Radius 96, 12 px rim, T of spokes, marker, hub.
+// FULL = 1: for a 1x2 tile. Radius 128, 16 px rim, T of spokes, marker, hub.
 // code: 0 no wheel here, 1 black, 2 yellow, 3 grey.
 
 module steering_wheel #(parameter FULL = 0) (
@@ -586,10 +618,11 @@ module steering_wheel #(parameter FULL = 0) (
         wire [6:0] b  = dy[6:0] ^ {7{dy[7]}};
         wire [7:0] s  = a + b;
 
-        wire in_out = (a < 7'd96) & (b < 7'd96) & (s < 8'd136);
-        wire in_in  = (a < 7'd84) & (b < 7'd84) & (s < 8'd119);
+        // a, b < 128 from their widths
+        wire in_out = (s < 8'd181);
+        wire in_in  = (a < 7'd112) & (b < 7'd112) & (s < 8'd158);
         wire rim    = in_out & ~in_in;
-        wire hub    = (a < 7'd14) & (b < 7'd14) & (s < 8'd20);
+        wire hub    = (a < 7'd20) & (b < 7'd20) & (s < 8'd28);
 
         // marker on the top of the rim, 16 px wide, centred on dx = 16 w
         wire [4:0] m    = dx[7:3] - {w[2], w, 1'b0};
@@ -627,6 +660,39 @@ module steering_wheel #(parameter FULL = 0) (
     end endgenerate
 
     wire _unused = &{negative, 1'b0};
+endmodule
+
+// ==========================================================================
+// interior.v
+// ==========================================================================
+// The static inside of the car, tested per pixel from the screen counters.
+// We sit on the left, so only the left has a pillar. The pillar's edge moves
+// away from the centre going up: t = y/4 + ~x is -32..-1 on the pillar and
+// >= 0 on the side window beyond it, which needs one adder and no carry in.
+// code: 0 none, 1 roof or pillar, 2 mirror, 3 top of the dashboard,
+//       4 instrument pod, 5 vent slat, 6 side window.
+
+module interior (
+    input  wire [9:0] x,
+    input  wire [9:0] y,
+    output wire [2:0] code
+);
+    wire [10:0] t = {4'b0000, y[8:2]} + ~{1'b0, x};
+    wire dash   = y[8] & (y[7] | (y[6] & y[5]));            // y >= 352
+    wire roof   = (y[9:4] == 6'd0);                         // y < 16
+    wire pillar = ~dash & (t[10:5] == 6'b111111);
+    wire window = ~dash & ~roof & ~t[10];
+    wire mirror = (x[9:7] == 3'b010) & (y[9:4] == 6'd1);    // rows 16-31
+    wire pad    = (y[8:4] == 5'b10110);                     // rows 352-367
+    wire pod    = y[8] & y[7] & (x[9:7] == 3'b000) & (x[6:5] != 2'b00);
+    wire vent   = (y[8:5] == 4'b1101) & (x[9:7] == 3'b100) & (x[6:5] != 2'b11) & y[2];
+
+    assign code = mirror        ? 3'd2 :
+                  roof | pillar ? 3'd1 :
+                  pad           ? 3'd3 :
+                  pod           ? 3'd4 :
+                  vent          ? 3'd5 :
+                  window        ? 3'd6 : 3'd0;
 endmodule
 
 // ==========================================================================

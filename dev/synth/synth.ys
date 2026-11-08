@@ -1,5 +1,5 @@
 # Map stage 1 onto GF180 7-track cells and report area per block.
-read_verilog -sv ../rtl/project.v ../rtl/vga_timing.v ../rtl/ip_input_sync.v ../rtl/car_state.v ../rtl/line_setup.v ../rtl/pixel_colour.v ../rtl/steering_wheel.v ../rtl/engine_audio.v
+read_verilog -sv ../rtl/project.v ../rtl/vga_timing.v ../rtl/ip_input_sync.v ../rtl/car_state.v ../rtl/line_setup.v ../rtl/pixel_colour.v ../rtl/steering_wheel.v ../rtl/interior.v ../rtl/engine_audio.v
 hierarchy -top tt_um_road_racer
 synth -top tt_um_road_racer
 dfflegalize -cell $_DFF_P_ 01

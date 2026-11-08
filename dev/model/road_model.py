@@ -7,7 +7,7 @@ Run:  python3 road_model.py
 Outputs: frames.png (montage), drive.gif (short drive), engine.wav (sound)
 
 Screen layout: sky rows 0-127, horizon row 128, road rows 129-383,
-dashboard rows 384-479. These boundaries make s_y = y - 128 and most region
+dashboard rows 352-479. These boundaries make s_y = y - 128 and most region
 tests plain bit slices in hardware.
 """
 import numpy as np
@@ -17,7 +17,7 @@ import wave
 # ---------------------------------------------------------------- constants
 W_SCREEN, H_SCREEN = 640, 480
 HORIZON  = 128          # row level with the eye
-DASH_TOP = 384          # dashboard starts here
+DASH_TOP = 352          # dashboard starts here; it is drawn over the road
 C_SHIFT  = 14           # fH = 2**14, so z = 2**14 // s_y, s_y = 1..255
 STRIPE_BIT = 3          # band half-period = 8 units of road
 D_SHIFT  = 5            # stripes use D >> 5 (4 bits)
@@ -37,7 +37,11 @@ Z_SAT_SY = 9            # rows with s_y below this use z = 2047
 def c(rr, gg, bb): return (rr << 4) | (gg << 2) | bb
 SKY      = [c(0,0,2), c(0,1,2), c(0,1,3), c(1,2,3)]   # bands of 32 rows
 MOUNTAIN = c(1,1,2)
-DASH_COL = c(1,0,1)
+DASH_COL = c(1,1,1)
+COCKPIT  = c(0,0,1)     # roof, left pillar, top of the dashboard
+MIRROR   = c(1,2,3)
+POD_COL  = c(0,0,0)
+VENT_COL = c(2,2,2)
 BAR_COL  = c(3,2,0)
 LINE_COL = c(3,3,3)
 TARMAC   = (c(1,1,1), c(2,2,2))     # (stripe=0, stripe=1)
@@ -158,10 +162,10 @@ def wheel_code(wheel, full):
     code = np.zeros_like(x_)
     if full:
         on = (x_ >= 192) & (x_ < 448) & (y_ >= 320)
-        in_out = (a < 96) & (b < 96) & (s < 136)
-        in_in  = (a < 84) & (b < 84) & (s < 119)
+        in_out = s < 181                    # a, b < 128 from their widths
+        in_in  = (a < 112) & (b < 112) & (s < 158)
         rim = in_out & ~in_in
-        hub = (a < 14) & (b < 14) & (s < 20)
+        hub = (a < 20) & (b < 20) & (s < 28)
         m = (dx >> 3) - 2 * wheel
         marker = rim & (dy < 0) & ((m == 0) | (m == -1))
         ty = 0 * dy if shift is None else dy >> shift
@@ -179,6 +183,32 @@ def wheel_code(wheel, full):
         spoke = in_in & (sh >= -4) & (sh < 4)
         code[rim | spoke] = 1
     code[~on] = 0
+    return code
+
+# ---------------------------------------------------------------- interior
+def interior_code(v):
+    """Per-pixel interior code: 0 none, 1 roof or pillar, 2 mirror, 3 top of the
+    dashboard, 4 instrument pod, 5 vent slat, 6 side window. We sit on the left,
+    so only the left has a pillar. t = y/4 + ~x uses one's complement, and the
+    pillar is where t is -32..-1 and the window where t >= 0."""
+    y_, x_ = np.mgrid[0:H_SCREEN, 0:W_SCREEN]
+    t = (y_ >> 2) + ~x_
+    dash = y_ >= DASH_TOP
+    roof = y_ < 16
+    pillar = ~dash & (t >= -32) & (t < 0)
+    window = ~dash & ~roof & (t >= 0)
+    mirror = (x_ >= 256) & (x_ < 384) & (y_ >= 16) & (y_ < 32)
+    pad = dash & (y_ < DASH_TOP + 16)
+    pod = (y_ >= 384) & (x_ >= 32) & (x_ < 128)
+    pod &= ~((x_ >= BAR_X0) & (x_ < BAR_X1) & (H_SCREEN - 1 - y_ < v >> 1))   # the bar shows
+    vent = (y_ >= 416) & (y_ < 448) & (x_ >= 512) & (x_ < 608) & ((y_ >> 2) & 1 == 1)
+    code = np.zeros_like(x_)
+    code[window] = 6
+    code[vent] = 5
+    code[pod] = 4
+    code[pad] = 3
+    code[roof | pillar] = 1
+    code[mirror] = 2
     return code
 
 # ---------------------------------------------------------------- renderer
@@ -225,6 +255,14 @@ def render(car):
             A = (car.h - 320) << 6         # centre offset folded into A
         elif HORIZON <= y < DASH_TOP:
             A += car.p
+    inner = interior_code(car.v)
+    tint = (img >> 1) & 0b01_01_01          # each channel halved
+    img[inner == 6] = tint[inner == 6]
+    img[inner == 1] = COCKPIT
+    img[inner == 2] = MIRROR
+    img[inner == 3] = COCKPIT
+    img[inner == 4] = POD_COL
+    img[inner == 5] = VENT_COL
     code = wheel_code(car.wheel, WHEEL_FULL)
     img[code == 1] = WHEEL0
     img[code == 2] = BAR_COL

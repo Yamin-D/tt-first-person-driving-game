@@ -26,6 +26,10 @@ divider already produces z, so each line's offset is up to three shifted adds in
 horizontal blanking. The track is a loop of 16 segments, and hard bends push the
 car outwards, so you have to steer through them.
 
+**Interior.** You sit on the left of the car: a roof, a left pillar with a tinted
+side window beyond it, a mirror, and a dashboard with an instrument pod and vents.
+All of it is static, tested per pixel from counter bits and one adder.
+
 **Steering wheel.** A steering wheel is drawn in the foreground and turns as you
 steer. Its angle has only five values, so no trigonometry is needed: the rim is
 the gap between two octagons, tested from |dx|, |dy| and |dx| + |dy|, and the

@@ -9,7 +9,7 @@
 //
 // The centre and radius make dx and dy bit slices of the counters.
 // FULL = 0: for a 1x1 tile. Radius 64, 8 px rim, one spoke, one colour.
-// FULL = 1: for a 1x2 tile. Radius 96, 12 px rim, T of spokes, marker, hub.
+// FULL = 1: for a 1x2 tile. Radius 128, 16 px rim, T of spokes, marker, hub.
 // code: 0 no wheel here, 1 black, 2 yellow, 3 grey.
 `default_nettype none
 
@@ -31,10 +31,11 @@ module steering_wheel #(parameter FULL = 0) (
         wire [6:0] b  = dy[6:0] ^ {7{dy[7]}};
         wire [7:0] s  = a + b;
 
-        wire in_out = (a < 7'd96) & (b < 7'd96) & (s < 8'd136);
-        wire in_in  = (a < 7'd84) & (b < 7'd84) & (s < 8'd119);
+        // a, b < 128 from their widths
+        wire in_out = (s < 8'd181);
+        wire in_in  = (a < 7'd112) & (b < 7'd112) & (s < 8'd158);
         wire rim    = in_out & ~in_in;
-        wire hub    = (a < 7'd14) & (b < 7'd14) & (s < 8'd20);
+        wire hub    = (a < 7'd20) & (b < 7'd20) & (s < 8'd28);
 
         // marker on the top of the rim, 16 px wide, centred on dx = 16 w
         wire [4:0] m    = dx[7:3] - {w[2], w, 1'b0};
