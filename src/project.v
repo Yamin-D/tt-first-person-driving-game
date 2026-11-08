@@ -16,7 +16,7 @@
  */
 
 module tt_um_yamin_d_first_person_driving_game #(
-    parameter WHEEL_FULL = 0        // 0: small wheel for 1x1, 1: full wheel for 1x2
+    parameter WHEEL_FULL = 1        // 0: small wheel for 1x1, 1: full wheel for 1x2
 ) (
     input  wire [7:0] ui_in,
     output wire [7:0] uo_out,
@@ -53,24 +53,25 @@ module tt_um_yamin_d_first_person_driving_game #(
     wire signed [7:0] p;
     wire        [8:0] D;
     wire              offroad;
+    wire signed [3:0] kappa;
     car_state car (
         .clk(clk), .rst_n(rst_q), .frame(frame),
         .left(btn[0]), .right(btn[1]), .accel(btn[2]), .brake(btn[3]),
-        .v(v), .wheel(wheel), .h(h), .p(p), .D(D), .offroad(offroad)
+        .v(v), .wheel(wheel), .h(h), .p(p), .D(D), .offroad(offroad), .kappa(kappa)
     );
 
     // ---- per-line values
-    wire         [3:0] z;
-    wire signed [16:0] A;
-    line_setup #(.Z_BITS(4)) line (
+    wire        [10:0] z;
+    wire signed [10:0] Ae;
+    line_setup #(.Z_BITS(11)) line (
         .clk(clk), .rst_n(rst_q), .x(x), .y(y), .h(h), .p(p),
-        .z(z), .A(A)
+        .kappa(kappa), .z(z), .Ae(Ae)
     );
 
     // ---- per-pixel colour
     wire [5:0] rgb;
     pixel_colour #(.WHEEL_FULL(WHEEL_FULL)) pix (
-        .clk(clk), .x(x), .y(y), .active(active), .z(z), .A(A), .h(h),
+        .clk(clk), .x(x), .y(y), .active(active), .z(z[3:0]), .Ae(Ae), .h(h),
         .d_hi(D[8:5]), .v(v), .wheel(wheel), .rgb(rgb)
     );
 
@@ -173,6 +174,8 @@ endmodule
 //   P      sideways position with 6 fraction bits; p = P >>> 6, road edge at |p| = 64,
 //          stops moving outwards past |p| = 96
 //   D      distance travelled, 9 bits, wraps (only its top bits are used)
+//   track  counts D wrapping; its top 4 bits are the track segment
+//   kappa  road curvature, moves one step towards the segment's value per wrap
 // Matches Car.frame() in road_model.py.
 
 module car_state (
@@ -188,7 +191,8 @@ module car_state (
     output reg  signed [7:0] h,
     output wire signed [7:0] p,
     output reg         [8:0] D,
-    output reg               offroad
+    output reg               offroad,
+    output reg  signed [3:0] kappa
 );
     localparam [7:0] V_MAX = 8'd192;
 
@@ -237,6 +241,22 @@ module car_state (
     // order as road_model.py, and it is all done within 4 clocks of the pulse.
     reg step_k, step_h, step_p;
 
+    // ---- the track: 16 segments of 64 wraps of D (see TRACK in road_model.py)
+    reg        [9:0] track;
+    reg signed [3:0] target;
+    always @(*) begin
+        case (track[9:6])
+            4'd2, 4'd3:   target =  4'sd5;
+            4'd5, 4'd6:   target = -4'sd6;
+            4'd8:         target =  4'sd7;
+            4'd9:         target = -4'sd8;
+            4'd11, 4'd12: target = -4'sd5;
+            4'd13:        target =  4'sd6;
+            default:      target =  4'sd0;
+        endcase
+    end
+    wire [9:0] D_sum = {1'b0, D} + {2'b00, v};
+
     // ---- speed factor 0, 1 or 2: multiplying by it is a shift
     reg k1, k2;                   // registered: v changes only on the frame pulse
     always @(posedge clk) begin
@@ -251,8 +271,11 @@ module car_state (
 
     // heading: h + wheel*k, held once it passes +/-96
     wire signed [7:0] w8  = {{5{wheel[2]}}, wheel};
-    wire signed [7:0] dh  = k2 ? (w8 <<< 1) : (k1 ? w8 : 8'sd0);
-    wire              h_stop = at_limit(h[7:5], wheel[2], (wheel == 3'sd0) || !(k1 || k2));
+    // a hard bend, |kappa| >= 4, pushes the heading outwards
+    wire              push  = kappa[2] ^ kappa[3];
+    wire signed [7:0] steer = !push ? w8 : kappa[3] ? w8 + 8'sd1 : w8 - 8'sd1;
+    wire signed [7:0] dh  = k2 ? (steer <<< 1) : (k1 ? steer : 8'sd0);
+    wire              h_stop = at_limit(h[7:5], steer[7], (steer == 8'sd0) || !(k1 || k2));
     wire signed [7:0] h1  = h_stop ? h : h + dh;
 
     // position: P + h*k, held once |p| passes 96
@@ -268,6 +291,8 @@ module car_state (
             h      <= 8'sd0;
             P      <= 14'sd0;
             D      <= 9'd0;
+            track  <= 10'd0;
+            kappa  <= 4'sd0;
             n      <= 3'd0;
             step_k <= 1'b0;
             step_h <= 1'b0;
@@ -285,7 +310,12 @@ module car_state (
                 h <= h1;
             if (step_p) begin
                 P <= P1;
-                D <= D + {1'b0, v};
+                D <= D_sum[8:0];
+                if (D_sum[9]) begin
+                    track <= track + 10'd1;
+                    if (kappa != target)
+                        kappa <= (kappa < target) ? kappa + 4'sd1 : kappa - 4'sd1;
+                end
             end
         end
     end
@@ -300,11 +330,13 @@ endmodule
 //        for the NEXT line in 15 clocks; the quotient register then holds that z
 //        for the whole of the next line.
 //   A  = ((h - 320) << 6) + p * s_y, within 17 bits. Loaded at the end of the
-//        last sky row and then built by adding p at the end of every road row. Folding h - 320 in
-//        means the pixel stage needs one adder: x - centre = x + (A >>> 6).
+//        last sky row and then built by adding p once per road row.
+//   Ae = (A >>> 6) plus the curve offset kappa * z / 64, for the next line. Built
+//        in horizontal blanking with up to three shifted adds, after the divider
+//        has finished, so the pixel stage still needs one adder: x - centre = x + Ae.
 
 module line_setup #(
-    parameter Z_BITS = 4          // quotient bits kept (2..15): 4 for stage 1, 15 for curves
+    parameter Z_BITS = 11         // quotient bits kept (11..15); curves use the low 11
 ) (
     input  wire               clk,
     input  wire               rst_n,
@@ -312,8 +344,9 @@ module line_setup #(
     input  wire        [9:0]  y,
     input  wire signed [7:0]  h,
     input  wire signed [7:0]  p,
+    input  wire signed [3:0]  kappa,
     output wire [Z_BITS-1:0]  z,
-    output reg  signed [16:0] A
+    output reg  signed [10:0] Ae
 );
     localparam [9:0] HORIZON  = 10'd128;
     localparam [9:0] DASH_TOP = 10'd384;
@@ -328,12 +361,18 @@ module line_setup #(
     // straight from a flip-flop on the same cycle as before. This keeps the
     // decode logic off the paths into the many registers they control.
     reg start;                    // high at x = 640 on rows 128..382
-    reg a_load;                   // high at x = 799 on row 127
-    reg a_add;                    // high at x = 799 on rows 128..383
+    reg a_load;                   // high at x = 640 on row 127
+    reg a_add;                    // high at x = 640 on rows 128..383
+    reg e_load;                   // high at x = 656, once z is ready
+    reg e_step;                   // high at x = 657..659
+    reg [1:0] e_bit;              // 0, 1, 2 while e_step is high
     always @(posedge clk) begin
         start  <= (x == 10'd639) && (y >= HORIZON) && (y < DASH_TOP - 10'd1);
-        a_load <= (x == 10'd798) && (y == HORIZON - 10'd1);
-        a_add  <= (x == 10'd798) && (y >= HORIZON) && (y < DASH_TOP);
+        a_load <= (x == 10'd639) && (y == HORIZON - 10'd1);
+        a_add  <= (x == 10'd639) && (y >= HORIZON) && (y < DASH_TOP);
+        e_load <= (x == 10'd655);
+        e_step <= (x >= 10'd656) && (x < 10'd659);
+        e_bit  <= x[1:0];
     end
 
     reg [7:0]  r;                 // remainder, always < d after a step
@@ -366,14 +405,33 @@ module line_setup #(
 
     // ---- centre offset and steering accumulator
     wire signed [10:0] h_off = {{3{h[7]}}, h} - 11'sd320;
-    // no reset: A is always loaded at the end of row 127, before any road row
+    // no reset: A is always loaded on row 127, before any road row
+    reg signed [16:0] A;
     always @(posedge clk) begin
         if (a_load)
             A <= {h_off, 6'b000000};
         else if (a_add)
             A <= A + {{9{p[7]}}, p};
     end
-    wire _unused = &{diff[8], 1'b0};
+
+    // ---- curve: Ae = (A >>> 6) -/+ (kappa * z >> 6), one shifted add per clock.
+    // Negative kappa's magnitude is its bit inversion; subtraction is one's
+    // complement, so no carry in. z is clamped very near the horizon (s_y < 9).
+    wire        sat  = (d[7:4] == 4'd0) & (~d[3] | (d[2:0] == 3'd0));
+    wire [10:0] zs   = sat ? 11'd2047 : q[10:0];
+    wire [2:0]  mag  = kappa[2:0] ^ {3{kappa[3]}};
+    wire [10:0] term = (e_bit == 2'd0) ? {6'd0, zs[10:6]} :
+                       (e_bit == 2'd1) ? {5'd0, zs[10:5]} : {4'd0, zs[10:4]};
+    wire        use_bit = (e_bit == 2'd0) ? mag[0] :
+                          (e_bit == 2'd1) ? mag[1] : mag[2];
+    // no reset: loaded on every line
+    always @(posedge clk) begin
+        if (e_load)
+            Ae <= A[16:6];
+        else if (e_step & use_bit)
+            Ae <= Ae + (term ^ {11{~kappa[3]}});
+    end
+    wire _unused = &{diff[8], A[5:0], 1'b0};
 endmodule
 
 // ==========================================================================
@@ -395,7 +453,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     input  wire        [9:0]  y,
     input  wire               active,
     input  wire        [3:0]  z,       // low bits of this line's depth, from line_setup
-    input  wire signed [16:0] A,       // ((h - 320) << 6) + p * s_y
+    input  wire signed [10:0] Ae,      // x - centre = x + Ae, set in blanking
     input  wire signed [7:0]  h,       // heading in pixels
     input  wire        [3:0]  d_hi,    // distance >> 5
     input  wire        [7:0]  v,       // speed, for the bar
@@ -429,8 +487,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire [8:0] kerb_w = {1'b0, s_y} + {4'b0000, s_y[7:3]};
     wire [3:0] dash_w = {1'b0, s_y[7:5]} + 4'd1;
 
-    wire signed [10:0] a6 = A[16:6];                // A >>> 6
-    wire signed [10:0] dx = $signed({1'b0, x}) + a6;    // x - centre
+    wire signed [10:0] dx = $signed({1'b0, x}) + Ae;    // x - centre
     wire        [9:0]  d  = dx[10] ? ~dx[9:0] : dx[9:0]; // |dx|, or |dx| - 1 when negative
 
     wire [3:0] band   = z[3:0] + d_hi;
@@ -491,7 +548,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         else
             rgb = stripe ? GRASS1 : GRASS0;
     end
-    wire _unused = &{A[5:0], h[7], band[2:0], 1'b0};
+    wire _unused = &{h[7], band[2:0], 1'b0};
 endmodule
 
 // ==========================================================================

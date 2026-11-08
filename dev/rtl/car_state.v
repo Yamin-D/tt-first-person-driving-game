@@ -5,6 +5,8 @@
 //   P      sideways position with 6 fraction bits; p = P >>> 6, road edge at |p| = 64,
 //          stops moving outwards past |p| = 96
 //   D      distance travelled, 9 bits, wraps (only its top bits are used)
+//   track  counts D wrapping; its top 4 bits are the track segment
+//   kappa  road curvature, moves one step towards the segment's value per wrap
 // Matches Car.frame() in road_model.py.
 `default_nettype none
 
@@ -21,7 +23,8 @@ module car_state (
     output reg  signed [7:0] h,
     output wire signed [7:0] p,
     output reg         [8:0] D,
-    output reg               offroad
+    output reg               offroad,
+    output reg  signed [3:0] kappa
 );
     localparam [7:0] V_MAX = 8'd192;
 
@@ -70,6 +73,22 @@ module car_state (
     // order as road_model.py, and it is all done within 4 clocks of the pulse.
     reg step_k, step_h, step_p;
 
+    // ---- the track: 16 segments of 64 wraps of D (see TRACK in road_model.py)
+    reg        [9:0] track;
+    reg signed [3:0] target;
+    always @(*) begin
+        case (track[9:6])
+            4'd2, 4'd3:   target =  4'sd5;
+            4'd5, 4'd6:   target = -4'sd6;
+            4'd8:         target =  4'sd7;
+            4'd9:         target = -4'sd8;
+            4'd11, 4'd12: target = -4'sd5;
+            4'd13:        target =  4'sd6;
+            default:      target =  4'sd0;
+        endcase
+    end
+    wire [9:0] D_sum = {1'b0, D} + {2'b00, v};
+
     // ---- speed factor 0, 1 or 2: multiplying by it is a shift
     reg k1, k2;                   // registered: v changes only on the frame pulse
     always @(posedge clk) begin
@@ -84,8 +103,11 @@ module car_state (
 
     // heading: h + wheel*k, held once it passes +/-96
     wire signed [7:0] w8  = {{5{wheel[2]}}, wheel};
-    wire signed [7:0] dh  = k2 ? (w8 <<< 1) : (k1 ? w8 : 8'sd0);
-    wire              h_stop = at_limit(h[7:5], wheel[2], (wheel == 3'sd0) || !(k1 || k2));
+    // a hard bend, |kappa| >= 4, pushes the heading outwards
+    wire              push  = kappa[2] ^ kappa[3];
+    wire signed [7:0] steer = !push ? w8 : kappa[3] ? w8 + 8'sd1 : w8 - 8'sd1;
+    wire signed [7:0] dh  = k2 ? (steer <<< 1) : (k1 ? steer : 8'sd0);
+    wire              h_stop = at_limit(h[7:5], steer[7], (steer == 8'sd0) || !(k1 || k2));
     wire signed [7:0] h1  = h_stop ? h : h + dh;
 
     // position: P + h*k, held once |p| passes 96
@@ -101,6 +123,8 @@ module car_state (
             h      <= 8'sd0;
             P      <= 14'sd0;
             D      <= 9'd0;
+            track  <= 10'd0;
+            kappa  <= 4'sd0;
             n      <= 3'd0;
             step_k <= 1'b0;
             step_h <= 1'b0;
@@ -118,7 +142,12 @@ module car_state (
                 h <= h1;
             if (step_p) begin
                 P <= P1;
-                D <= D + {1'b0, v};
+                D <= D_sum[8:0];
+                if (D_sum[9]) begin
+                    track <= track + 10'd1;
+                    if (kappa != target)
+                        kappa <= (kappa < target) ? kappa + 4'sd1 : kappa - 4'sd1;
+                end
             end
         end
     end

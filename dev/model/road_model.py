@@ -23,9 +23,15 @@ STRIPE_BIT = 3          # band half-period = 8 units of road
 D_SHIFT  = 5            # stripes use D >> 5 (4 bits)
 FOG_SY   = 32           # no stripes for s_y < 32 (s_y[7:5] == 0)
 V_MAX    = 192
-WHEEL_FULL = False      # False: small wheel for 1x1, True: full wheel for 1x2
+WHEEL_FULL = True       # False: small wheel for 1x1, True: full wheel for 1x2
 BAR_X0, BAR_X1 = 64, 96 # columns of the vertical speed bar
 ROAD_EDGE, KERB_EDGE = 64, 72   # |p| thresholds (W/H = 1, kerb is w/8)
+
+# curvature wanted in each of the 16 track segments (64 distance wraps each).
+# kappa is 4 bits; a negative value's magnitude is its bit inversion, so 5 and
+# -6, or 7 and -8, are the same bend in opposite directions.
+TRACK = [0, 0, 5, 5, 0, -6, -6, 0, 7, -8, 0, -5, -5, 6, 0, 0]
+Z_SAT_SY = 9            # rows with s_y below this use z = 2047
 
 # RGB222 colours, written RR_GG_BB
 def c(rr, gg, bb): return (rr << 4) | (gg << 2) | bb
@@ -68,6 +74,8 @@ class Car:
         self.wheel = 0                        # 3s, -2..2
         self.h = 0                            # 8s heading, pixels, about -100..99
         self.P = 0                            # 14s sideways position, p = P >> 6
+        self.track = 0                        # 10u distance wraps; top 4 bits are the segment
+        self.kappa = 0                        # 4s road curvature
 
     @property
     def p(self):
@@ -98,14 +106,40 @@ class Car:
         elif right and not left:  self.wheel = min(self.wheel + 1, 2)
         elif self.wheel:          self.wheel -= 1 if self.wheel > 0 else -1
         k = 2 if v >= 128 else (1 if v >= 64 else 0)   # speed factor: a shift
-        dh = self.wheel * k
+        # a hard bend (|kappa| >= 4) pushes the heading outwards
+        mag = ~self.kappa if self.kappa < 0 else self.kappa
+        push = 0 if mag < 4 else (1 if self.kappa < 0 else -1)
+        dh = (self.wheel + push) * k
         if not at_limit(self.h, dh):
             self.h += dh
         dP = self.h * k
         if not at_limit(self.p, dP):
             self.P += dP
-        self.D = (self.D + v) & 0x1FF
+        total = self.D + v
+        self.D = total & 0x1FF
+        if total > 0x1FF:                     # every 512 units of distance
+            target = TRACK[self.track >> 6]
+            if self.kappa != target:
+                self.kappa += 1 if self.kappa < target else -1
+            self.track = (self.track + 1) & 0x3FF
         self.n = (self.n + 1) & 0x7
+
+# ---------------------------------------------------------------- curves
+def wrap11(value):
+    return ((value + 1024) & 2047) - 1024
+
+def line_centre(A, z, s_y, kappa):
+    """The per-line value Ae with x - centre = x + Ae: A >> 6 plus the curve
+    offset kappa * z / 64, built as the hardware does with up to three shifted
+    adds in horizontal blanking. Each is one's complement when kappa >= 0."""
+    Ae = wrap11(A >> 6)
+    zs = 2047 if s_y < Z_SAT_SY else z & 0x7FF
+    mag = (~kappa if kappa < 0 else kappa) & 7
+    for bit, shift in enumerate((6, 5, 4)):
+        if (mag >> bit) & 1:
+            term = zs >> shift
+            Ae = wrap11(Ae + (term if kappa < 0 else ~term))
+    return Ae
 
 # ---------------------------------------------------------------- steering wheel
 def wheel_code(wheel, full):
@@ -177,7 +211,7 @@ def render(car):
                 w = s_y
                 kerb_w = w + (w >> 3)
                 dash_w = (w >> 5) + 1
-                dx = x + (A >> 6)          # x - centre, one adder
+                dx = x + line_centre(A, z, s_y, car.kappa)   # x - centre, one adder
                 d = np.where(dx < 0, -dx - 1, dx)   # bit inversion, not negation
                 stripe = ((z + d_hi) >> STRIPE_BIT) & 1 if s_y >= FOG_SY else 0
                 row = np.full(W_SCREEN, GRASS[stripe], np.uint8)
@@ -239,6 +273,16 @@ def random_script(n, seed=1):
                     accel=rng.random() < 0.6, brake=rng.random() < 0.15)
         out += [keys] * rng.randint(1, 40)
     return out[:n]
+
+def lap_script(n):
+    """Flat out with simple steering that holds the road, to reach the bends."""
+    car = Car(); out = []
+    for _ in range(n):
+        err = car.h + (car.p >> 1)
+        keys = dict(accel=1, left=err > 4, right=err < -4)
+        car.frame(**keys)
+        out.append(keys)
+    return out
 
 def keys_to_bits(k):
     return "%d%d%d%d" % (k.get("left", 0), k.get("right", 0),

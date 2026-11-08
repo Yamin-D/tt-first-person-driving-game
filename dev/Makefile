@@ -27,7 +27,7 @@ units:
 	$(PY) test/check_units.py
 
 chip:
-	$(PY) test/check_chip.py
+	ROAD_FULL=0 $(PY) test/check_chip.py
 	ROAD_FULL=1 $(PY) test/check_chip.py
 
 project:

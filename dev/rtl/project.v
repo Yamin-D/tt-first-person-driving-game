@@ -11,7 +11,7 @@
 `default_nettype none
 
 module tt_um_road_racer #(
-    parameter WHEEL_FULL = 0        // 0: small wheel for 1x1, 1: full wheel for 1x2
+    parameter WHEEL_FULL = 1        // 0: small wheel for 1x1, 1: full wheel for 1x2
 ) (
     input  wire [7:0] ui_in,
     output wire [7:0] uo_out,
@@ -48,24 +48,25 @@ module tt_um_road_racer #(
     wire signed [7:0] p;
     wire        [8:0] D;
     wire              offroad;
+    wire signed [3:0] kappa;
     car_state car (
         .clk(clk), .rst_n(rst_q), .frame(frame),
         .left(btn[0]), .right(btn[1]), .accel(btn[2]), .brake(btn[3]),
-        .v(v), .wheel(wheel), .h(h), .p(p), .D(D), .offroad(offroad)
+        .v(v), .wheel(wheel), .h(h), .p(p), .D(D), .offroad(offroad), .kappa(kappa)
     );
 
     // ---- per-line values
-    wire         [3:0] z;
-    wire signed [16:0] A;
-    line_setup #(.Z_BITS(4)) line (
+    wire        [10:0] z;
+    wire signed [10:0] Ae;
+    line_setup #(.Z_BITS(11)) line (
         .clk(clk), .rst_n(rst_q), .x(x), .y(y), .h(h), .p(p),
-        .z(z), .A(A)
+        .kappa(kappa), .z(z), .Ae(Ae)
     );
 
     // ---- per-pixel colour
     wire [5:0] rgb;
     pixel_colour #(.WHEEL_FULL(WHEEL_FULL)) pix (
-        .clk(clk), .x(x), .y(y), .active(active), .z(z), .A(A), .h(h),
+        .clk(clk), .x(x), .y(y), .active(active), .z(z[3:0]), .Ae(Ae), .h(h),
         .d_hi(D[8:5]), .v(v), .wheel(wheel), .rgb(rgb)
     );
 

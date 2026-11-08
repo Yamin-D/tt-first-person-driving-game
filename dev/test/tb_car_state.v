@@ -12,12 +12,13 @@ module tb_car_state;
     wire signed [7:0] p;
     wire [8:0] D;
     wire offroad;
+    wire signed [3:0] kappa;
     integer fd, code;
     reg [3:0] keys;
 
     car_state dut (.clk(clk), .rst_n(rst_n), .frame(frame),
                    .left(left), .right(right), .accel(accel), .brake(brake),
-                   .v(v), .wheel(wheel), .h(h), .p(p), .D(D), .offroad(offroad));
+                   .v(v), .wheel(wheel), .h(h), .p(p), .D(D), .offroad(offroad), .kappa(kappa));
 
     always #20 clk = ~clk;
 
@@ -31,7 +32,7 @@ module tb_car_state;
             @(posedge clk); #1 frame = 1;
             @(posedge clk); #1 frame = 0;
             repeat (4) @(posedge clk); #1;      // speed factor, heading, position, off-road
-            $display("%0d %0d %0d %0d %0d %0d", v, wheel, h, dut.P, D, offroad);
+            $display("%0d %0d %0d %0d %0d %0d %0d %0d", v, wheel, h, dut.P, D, offroad, kappa, dut.track);
         end
         $finish;
     end

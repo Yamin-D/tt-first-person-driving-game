@@ -6,11 +6,11 @@ module tb_divider;
     reg clk = 0, rst_n = 0;
     reg [9:0] x = 0, y = 0;
     wire [14:0] z;
-    wire signed [16:0] A;
+    wire signed [10:0] Ae;
     integer s, k;
 
     line_setup #(.Z_BITS(15)) dut (.clk(clk), .rst_n(rst_n), .x(x), .y(y), .h(8'sd0),
-                    .p(8'sd0), .z(z), .A(A));
+                    .p(8'sd0), .kappa(4'sd0), .z(z), .Ae(Ae));
 
     always #20 clk = ~clk;
 

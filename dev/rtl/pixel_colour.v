@@ -15,7 +15,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     input  wire        [9:0]  y,
     input  wire               active,
     input  wire        [3:0]  z,       // low bits of this line's depth, from line_setup
-    input  wire signed [16:0] A,       // ((h - 320) << 6) + p * s_y
+    input  wire signed [10:0] Ae,      // x - centre = x + Ae, set in blanking
     input  wire signed [7:0]  h,       // heading in pixels
     input  wire        [3:0]  d_hi,    // distance >> 5
     input  wire        [7:0]  v,       // speed, for the bar
@@ -49,8 +49,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire [8:0] kerb_w = {1'b0, s_y} + {4'b0000, s_y[7:3]};
     wire [3:0] dash_w = {1'b0, s_y[7:5]} + 4'd1;
 
-    wire signed [10:0] a6 = A[16:6];                // A >>> 6
-    wire signed [10:0] dx = $signed({1'b0, x}) + a6;    // x - centre
+    wire signed [10:0] dx = $signed({1'b0, x}) + Ae;    // x - centre
     wire        [9:0]  d  = dx[10] ? ~dx[9:0] : dx[9:0]; // |dx|, or |dx| - 1 when negative
 
     wire [3:0] band   = z[3:0] + d_hi;
@@ -111,5 +110,5 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         else
             rgb = stripe ? GRASS1 : GRASS0;
     end
-    wire _unused = &{A[5:0], h[7], band[2:0], 1'b0};
+    wire _unused = &{h[7], band[2:0], 1'b0};
 endmodule

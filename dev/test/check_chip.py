@@ -24,7 +24,7 @@ if os.environ.get("ROAD_SRC") == "project":       # test the generated src/proje
     open(renamed, "w").write(text.replace("module " + top, "module tt_um_road_racer"))
     srcs = [renamed]
     OBJ = OBJ + "_project"
-full = os.environ.get("ROAD_FULL") == "1"         # test the 1x2 wheel
+full = os.environ.get("ROAD_FULL", str(int(m.WHEEL_FULL))) == "1"  # which wheel version
 m.WHEEL_FULL = full
 if full:
     OBJ = OBJ + "_full"
@@ -52,10 +52,13 @@ def coverage_frames(script):
         first.setdefault(("wheel", car.wheel), i + 1)
         if car.v == m.V_MAX:
             first.setdefault("top speed", i + 1)
+        if car.kappa in (-8, 7):
+            first.setdefault(("kappa", car.kappa), i + 1)
     return first
 
 runs = [("drive", m.drive_script(), [0, 1, 64, 131, 140, 150, 166, 175, 200, 215, 240, 290, 305]),
-        ("random", m.random_script(1200), None)]
+        ("random", m.random_script(1200), None),
+        ("laps", m.lap_script(1900), [])]
 failures = 0; outs = []; covered = set()
 for name, script, check in runs:
     if check is None:
@@ -86,7 +89,7 @@ for name, script, check in runs:
             Image.fromarray(m.to_rgb(hw)).save(os.path.join(BUILD, "chip_frame_150.png"))
     out = "".join(outs)
 
-missing = {("wheel", w) for w in range(-2, 3)} | {"top speed"}
+missing = {("wheel", w) for w in range(-2, 3)} | {"top speed", ("kappa", -8), ("kappa", 7)}
 missing -= covered
 print("coverage missing:", sorted(map(str, missing)) or "none")
 ok = not missing and failures == 0 and all("sync errors: 0" in o and "uio_oe errors: 0" in o for o in outs)

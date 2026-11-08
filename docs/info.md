@@ -20,6 +20,12 @@ the wheel and the car drifts across the road according to its heading, both in
 proportion to speed. Turning slides the whole view, including the mountains on
 the horizon. On the grass the car is slowed down.
 
+**Curves.** A road bending with curvature k has a sideways offset of k z^2 / 2 at
+distance z, so after perspective its offset on screen is proportional to z. The
+divider already produces z, so each line's offset is up to three shifted adds in
+horizontal blanking. The track is a loop of 16 segments, and hard bends push the
+car outwards, so you have to steer through them.
+
 **Steering wheel.** A steering wheel is drawn in the foreground and turns as you
 steer. Its angle has only five values, so no trigonometry is needed: the rim is
 the gap between two octagons, tested from |dx|, |dy| and |dx| + |dy|, and the

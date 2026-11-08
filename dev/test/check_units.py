@@ -27,15 +27,18 @@ print("divider:   %d rows checked, %d mismatches" % (len(lines), len(bad)))
 failures += len(bad)
 
 # ---- car state: the demo drive, then 3000 frames of random buttons
+seen_kappa = set(); wrapped = False
 for name, script in [("drive", m.drive_script()),
-                     ("random", m.random_script(3000))]:
+                     ("random", m.random_script(3000)),
+                     ("laps", m.lap_script(7000))]:
     with open(os.path.join(BUILD, "script.txt"), "w") as f:
         f.write("\n".join(m.keys_to_bits(k) for k in script) + "\n")
     hw = run("tb_car_state", ["car_state.v"])
     car = m.Car(); bad = 0
     for i, (keys, line) in enumerate(zip(script, hw)):
         car.frame(**keys)
-        want = (car.v, car.wheel, car.h, car.P, car.D, int(car.offroad()))
+        want = (car.v, car.wheel, car.h, car.P, car.D, int(car.offroad()), car.kappa, car.track)
+        seen_kappa.add(car.kappa); wrapped |= (i > 0 and car.track == 0 and car.v > 0 and name == "laps")
         got = tuple(int(t) for t in line.split())
         if got != want:
             if bad < 5:
@@ -43,6 +46,21 @@ for name, script in [("drive", m.drive_script()),
             bad += 1
     print("car_state (%s): %d frames, %d mismatches" % (name, len(hw), bad))
     failures += bad + (len(hw) != len(script))
+
+if not ({-8, 7} <= seen_kappa and wrapped):
+    print("  coverage: kappa seen %s, track wrapped %s" % (sorted(seen_kappa), wrapped))
+    failures += 1
+
+# ---- curve offset: every road row, all curvatures, extreme heading and position
+lines = run("tb_curve", ["line_setup.v"])
+bad = 0
+for l in lines:
+    h, p, k, s, got = map(int, l.split())
+    A = ((h - 320) << 6) + p * s
+    if got != m.line_centre(A, m.serial_recip(s), s, k):
+        bad += 1
+print("curve:     %d rows checked, %d mismatches" % (len(lines), bad))
+failures += bad + (len(lines) != 3 * 3 * 16 * 255)
 
 # ---- audio: speeds from the random script, including off-road stretches
 car = m.Car(); speeds = []; offs = []
