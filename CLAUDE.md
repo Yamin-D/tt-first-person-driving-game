@@ -25,6 +25,11 @@ It is a first-person pseudo-3D driving game drawn straight to VGA, with sound.
   dev/rtl/project.v (0 = small for 1x1, the default; 1 = full for 1x2, also set
   WHEEL_FULL = True in the model and `tiles: "1x2"`). Before LibreLane: small
   34,247 um^2, full 36,851 um^2. `make chip` tests both.
+  Tiny Tapeout build of the small wheel on 1x1: 84.1% core utilisation, worst
+  slow-corner setup slack +3.47 ns, 4 routing passes, DRC/LVS/antenna clean.
+  1x1 is now full. Slack moves by a few ns between layouts (the build before
+  the wheel had -0.20 ns and CI stayed green), so read final/metrics.json from
+  the GDS_logs artifact rather than trusting the green tick.
 - Next after the wheel (Yamin's priorities): a car interior and dashboard
   that look real, and curved roads.
 
