@@ -26,8 +26,14 @@ divider already produces z, so each line's offset is up to three shifted adds in
 horizontal blanking. The track is a loop of 16 segments, and hard bends push the
 car outwards, so you have to steer through them.
 
+**Traffic.** You drive on the right. A slow car holds your lane and oncoming cars
+use the left lane, so overtaking means judging the gap. A car's depth is compared
+with each row's depth, so perspective and the road's curves apply automatically.
+Hitting a car stops you for about a second and resets the score, which counts cars
+overtaken and is shown on the dashboard.
+
 **Interior.** You sit on the left of the car: a roof, a left pillar with a tinted
-side window beyond it, a mirror, and a dashboard with an instrument pod and vents.
+side window beyond it, a mirror, and a dashboard with vents.
 All of it is static, tested per pixel from counter bits and one adder.
 
 **Steering wheel.** A steering wheel is drawn in the foreground and turns as you
@@ -49,7 +55,8 @@ frame against it from the VGA pins.
 2. Set the clock to 25 MHz (25.175 MHz is the ideal VGA value; both work).
 3. Hold rst_n low for a few clocks, then release it.
 4. Inputs (active high): ui[0] steer left, ui[1] steer right, ui[2] accelerate,
-   ui[3] brake. The vertical bar on the dashboard shows the current speed.
+   ui[3] brake. On the dashboard, the left number is your speed and the right number is
+   your score, the cars overtaken.
 
 ## External hardware
 

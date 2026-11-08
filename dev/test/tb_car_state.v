@@ -13,12 +13,15 @@ module tb_car_state;
     wire [8:0] D;
     wire offroad;
     wire signed [3:0] kappa;
+    wire [11:0] slow, onc;
+    wire [3:0] tens, ones;
     integer fd, code;
     reg [3:0] keys;
 
     car_state dut (.clk(clk), .rst_n(rst_n), .frame(frame),
                    .left(left), .right(right), .accel(accel), .brake(brake),
-                   .v(v), .wheel(wheel), .h(h), .p(p), .D(D), .offroad(offroad), .kappa(kappa));
+                   .v(v), .wheel(wheel), .h(h), .p(p), .D(D), .offroad(offroad), .kappa(kappa),
+                   .slow(slow), .onc(onc), .tens(tens), .ones(ones));
 
     always #20 clk = ~clk;
 
@@ -31,8 +34,8 @@ module tb_car_state;
             {left, right, accel, brake} = keys;
             @(posedge clk); #1 frame = 1;
             @(posedge clk); #1 frame = 0;
-            repeat (4) @(posedge clk); #1;      // speed factor, heading, position, off-road
-            $display("%0d %0d %0d %0d %0d %0d %0d %0d", v, wheel, h, dut.P, D, offroad, kappa, dut.track);
+            repeat (9) @(posedge clk); #1;      // all the steps, including traffic and collision
+            $display("%0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d", v, wheel, h, dut.P, D, offroad, kappa, dut.track, slow, onc, dut.crash, tens, ones);
         end
         $finish;
     end

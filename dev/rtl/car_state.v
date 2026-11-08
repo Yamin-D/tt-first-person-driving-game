@@ -7,6 +7,8 @@
 //   D      distance travelled, 9 bits, wraps (only its top bits are used)
 //   track  counts D wrapping; its top 4 bits are the track segment
 //   kappa  road curvature, moves one step towards the segment's value per wrap
+//   slow, onc  depths of the slow and oncoming cars, 1 fraction bit, one shared adder
+//   crash  frames left of the crash stop; tens, ones  score, cars overtaken
 // Matches Car.frame() in road_model.py.
 `default_nettype none
 
@@ -24,7 +26,14 @@ module car_state (
     output wire signed [7:0] p,
     output reg         [8:0] D,
     output reg               offroad,
-    output reg  signed [3:0] kappa
+    output reg  signed [3:0] kappa,
+    output reg         [11:0] slow,
+    output reg         [11:0] onc,
+    output reg                clr_slow,   // this car respawned: forget its base row
+    output reg                clr_onc,
+    output reg                flash,      // crash stop in progress
+    output reg         [3:0]  tens,
+    output reg         [3:0]  ones
 );
     localparam [7:0] V_MAX = 8'd192;
 
@@ -71,7 +80,28 @@ module car_state (
     //   step_p    position and distance, from the registered heading
     // This gives exactly the same result as doing it all at once, in the same
     // order as road_model.py, and it is all done within 4 clocks of the pulse.
-    reg step_k, step_h, step_p;
+    reg step_k, step_h, step_p, step_s, step_o, step_x;
+    reg [5:0] crash;
+    wire crashing = (crash != 6'd0);
+
+    // ---- traffic: one adder, slow car on step_s, oncoming car on step_o
+    wire        [11:0] z_now = step_o ? onc : slow;
+    wire signed  [5:0] delta = (step_o ? -6'sd4 : 6'sd6) - {2'b00, v[7:4]};
+    wire        [12:0] z_sum = {1'b0, z_now} + {{7{delta[5]}}, delta};
+    wire               z_under = z_sum[12];              // passed: respawn
+    wire               z_hold  = ~delta[5] & (z_now[11:6] == 6'b111111);
+    wire         [4:0] rnd   = D[4:0] ^ {track[1:0], n};
+    wire        [11:0] far_s = {1'b1,  rnd, 6'd0};
+    wire        [11:0] far_o = {1'b1, ~rnd, 6'd0};
+    wire        [11:0] z_next = z_hold ? z_now : z_sum[11:0];
+    wire near_s = (slow[11:7] == 5'd0);
+    wire near_o = (onc[11:7] == 5'd0);
+    wire hit = (near_s & ~p[7] & ~p[6]) | (near_o & p[7] & p[6]);
+    always @(posedge clk) begin
+        flash    <= crashing;
+        clr_slow <= (step_s & z_under) | (step_x & hit);
+        clr_onc  <= (step_o & z_under) | (step_x & hit);
+    end
 
     // ---- the track: 16 segments of 64 wraps of D (see TRACK in road_model.py)
     reg        [9:0] track;
@@ -121,22 +151,37 @@ module car_state (
             v      <= 8'd0;
             wheel  <= 3'sd0;
             h      <= 8'sd0;
-            P      <= 14'sd0;
+            P      <= 14'sd2048;           // right lane
             D      <= 9'd0;
             track  <= 10'd0;
             kappa  <= 4'sd0;
+            slow   <= 12'd2048;
+            onc    <= 12'd2048;
+            crash  <= 6'd0;
+            tens   <= 4'd0;
+            ones   <= 4'd0;
+            step_s <= 1'b0;
+            step_o <= 1'b0;
+            step_x <= 1'b0;
             n      <= 3'd0;
             step_k <= 1'b0;
             step_h <= 1'b0;
             step_p <= 1'b0;
         end else begin
-            step_k <= frame;
+            step_k <= frame & ~crashing;
             step_h <= step_k;
             step_p <= step_h;
+            step_s <= step_p;
+            step_o <= step_s;
+            step_x <= step_o;
             if (frame) begin
-                v     <= v1;
-                wheel <= wheel1;
-                n     <= n + 3'd1;
+                n <= n + 3'd1;
+                if (crashing) begin
+                    crash <= crash - 6'd1;
+                end else begin
+                    v     <= v1;
+                    wheel <= wheel1;
+                end
             end
             if (step_h)
                 h <= h1;
@@ -148,6 +193,27 @@ module car_state (
                     if (kappa != target)
                         kappa <= (kappa < target) ? kappa + 4'sd1 : kappa - 4'sd1;
                 end
+            end
+            if (step_s) begin
+                slow <= z_under ? far_s : z_next;
+                if (z_under) begin
+                    ones <= (ones == 4'd9) ? 4'd0 : ones + 4'd1;
+                    if (ones == 4'd9)
+                        tens <= (tens == 4'd9) ? 4'd0 : tens + 4'd1;
+                end
+            end
+            if (step_o)
+                onc <= z_under ? far_o : z_next;
+            if (step_x & hit) begin
+                crash <= 6'd63;
+                v     <= 8'd0;
+                wheel <= 3'sd0;
+                h     <= 8'sd0;
+                P     <= 14'sd2048;
+                slow  <= far_s;
+                onc   <= far_o;
+                tens  <= 4'd0;
+                ones  <= 4'd0;
             end
         end
     end

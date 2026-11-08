@@ -26,6 +26,8 @@ rtl/ip_input_sync.v  two-flop button synchroniser
 rtl/car_state.v      speed, wheel, heading, position, distance; once per frame
 rtl/line_setup.v     divider for z = 2^14 / s_y, steering accumulator A; once per line
 rtl/pixel_colour.v   colour of each pixel; adders and comparators only
+rtl/car_shape.v     the shape of one upright car in a row and column
+rtl/score_display.v the speed and score digits on the dashboard
 rtl/interior.v       the static cockpit: roof, left pillar, side window, mirror, dashboard
 rtl/steering_wheel.v the wheel in the foreground; FULL selects the 1x1 or 1x2 version
 rtl/engine_audio.v   engine pitch from speed, gravel noise off-road, PWM out

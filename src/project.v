@@ -54,25 +54,35 @@ module tt_um_yamin_d_first_person_driving_game #(
     wire        [8:0] D;
     wire              offroad;
     wire signed [3:0] kappa;
+    wire       [11:0] slow, onc;
+    wire              clr_slow, clr_onc;
+    wire              flash;
+    wire        [3:0] tens, ones;
     car_state car (
         .clk(clk), .rst_n(rst_q), .frame(frame),
         .left(btn[0]), .right(btn[1]), .accel(btn[2]), .brake(btn[3]),
-        .v(v), .wheel(wheel), .h(h), .p(p), .D(D), .offroad(offroad), .kappa(kappa)
+        .v(v), .wheel(wheel), .h(h), .p(p), .D(D), .offroad(offroad), .kappa(kappa),
+        .slow(slow), .onc(onc), .clr_slow(clr_slow), .clr_onc(clr_onc), .flash(flash),
+        .tens(tens), .ones(ones)
     );
 
     // ---- per-line values
     wire        [10:0] z;
     wire signed [10:0] Ae;
+    wire        [10:0] zs;
+    wire               z_latch;
     line_setup #(.Z_BITS(11)) line (
         .clk(clk), .rst_n(rst_q), .x(x), .y(y), .h(h), .p(p),
-        .kappa(kappa), .z(z), .Ae(Ae)
+        .kappa(kappa), .z(z), .Ae(Ae), .zs(zs), .latch(z_latch)
     );
 
     // ---- per-pixel colour
     wire [5:0] rgb;
     pixel_colour #(.WHEEL_FULL(WHEEL_FULL)) pix (
-        .clk(clk), .x(x), .y(y), .active(active), .z(z[3:0]), .Ae(Ae), .h(h),
-        .d_hi(D[8:5]), .v(v), .wheel(wheel), .rgb(rgb)
+        .clk(clk), .rst_n(rst_q), .x(x), .y(y), .active(active), .z(z[3:0]), .Ae(Ae), .h(h),
+        .d_hi(D[8:5]), .wheel(wheel), .v(v), .zs(zs), .latch(z_latch),
+        .zc_slow(slow[11:1]), .zc_onc(onc[11:1]), .clr_slow(clr_slow), .clr_onc(clr_onc),
+        .flash(flash), .tens(tens), .ones(ones), .rgb(rgb)
     );
 
     // ---- sound
@@ -80,7 +90,7 @@ module tt_um_yamin_d_first_person_driving_game #(
     wire       audio;
     engine_audio engine (
         .clk(clk), .rst_n(rst_q), .tick(line_end), .v(v),
-        .offroad(offroad), .pwm_count(x[7:0]), .sample(sample), .out(audio)
+        .offroad(offroad | flash), .pwm_count(x[7:0]), .sample(sample), .out(audio)
     );
 
     // ---- outputs, registered so every pin changes on the same clock edge.
@@ -99,7 +109,7 @@ module tt_um_yamin_d_first_person_driving_game #(
     assign uio_out = {7'b0000000, audio};
     assign uio_oe  = 8'b0000_0001;
 
-    wire _unused = &{ena, uio_in, ui_in[7:4], D[4:0], frame, sample, 1'b0};
+    wire _unused = &{ena, uio_in, ui_in[7:4], D[4:0], z[10:4], slow[0], onc[0], frame, sample, 1'b0};
 endmodule
 
 // ==========================================================================
@@ -176,6 +186,8 @@ endmodule
 //   D      distance travelled, 9 bits, wraps (only its top bits are used)
 //   track  counts D wrapping; its top 4 bits are the track segment
 //   kappa  road curvature, moves one step towards the segment's value per wrap
+//   slow, onc  depths of the slow and oncoming cars, 1 fraction bit, one shared adder
+//   crash  frames left of the crash stop; tens, ones  score, cars overtaken
 // Matches Car.frame() in road_model.py.
 
 module car_state (
@@ -192,7 +204,14 @@ module car_state (
     output wire signed [7:0] p,
     output reg         [8:0] D,
     output reg               offroad,
-    output reg  signed [3:0] kappa
+    output reg  signed [3:0] kappa,
+    output reg         [11:0] slow,
+    output reg         [11:0] onc,
+    output reg                clr_slow,   // this car respawned: forget its base row
+    output reg                clr_onc,
+    output reg                flash,      // crash stop in progress
+    output reg         [3:0]  tens,
+    output reg         [3:0]  ones
 );
     localparam [7:0] V_MAX = 8'd192;
 
@@ -239,7 +258,28 @@ module car_state (
     //   step_p    position and distance, from the registered heading
     // This gives exactly the same result as doing it all at once, in the same
     // order as road_model.py, and it is all done within 4 clocks of the pulse.
-    reg step_k, step_h, step_p;
+    reg step_k, step_h, step_p, step_s, step_o, step_x;
+    reg [5:0] crash;
+    wire crashing = (crash != 6'd0);
+
+    // ---- traffic: one adder, slow car on step_s, oncoming car on step_o
+    wire        [11:0] z_now = step_o ? onc : slow;
+    wire signed  [5:0] delta = (step_o ? -6'sd4 : 6'sd6) - {2'b00, v[7:4]};
+    wire        [12:0] z_sum = {1'b0, z_now} + {{7{delta[5]}}, delta};
+    wire               z_under = z_sum[12];              // passed: respawn
+    wire               z_hold  = ~delta[5] & (z_now[11:6] == 6'b111111);
+    wire         [4:0] rnd   = D[4:0] ^ {track[1:0], n};
+    wire        [11:0] far_s = {1'b1,  rnd, 6'd0};
+    wire        [11:0] far_o = {1'b1, ~rnd, 6'd0};
+    wire        [11:0] z_next = z_hold ? z_now : z_sum[11:0];
+    wire near_s = (slow[11:7] == 5'd0);
+    wire near_o = (onc[11:7] == 5'd0);
+    wire hit = (near_s & ~p[7] & ~p[6]) | (near_o & p[7] & p[6]);
+    always @(posedge clk) begin
+        flash    <= crashing;
+        clr_slow <= (step_s & z_under) | (step_x & hit);
+        clr_onc  <= (step_o & z_under) | (step_x & hit);
+    end
 
     // ---- the track: 16 segments of 64 wraps of D (see TRACK in road_model.py)
     reg        [9:0] track;
@@ -289,22 +329,37 @@ module car_state (
             v      <= 8'd0;
             wheel  <= 3'sd0;
             h      <= 8'sd0;
-            P      <= 14'sd0;
+            P      <= 14'sd2048;           // right lane
             D      <= 9'd0;
             track  <= 10'd0;
             kappa  <= 4'sd0;
+            slow   <= 12'd2048;
+            onc    <= 12'd2048;
+            crash  <= 6'd0;
+            tens   <= 4'd0;
+            ones   <= 4'd0;
+            step_s <= 1'b0;
+            step_o <= 1'b0;
+            step_x <= 1'b0;
             n      <= 3'd0;
             step_k <= 1'b0;
             step_h <= 1'b0;
             step_p <= 1'b0;
         end else begin
-            step_k <= frame;
+            step_k <= frame & ~crashing;
             step_h <= step_k;
             step_p <= step_h;
+            step_s <= step_p;
+            step_o <= step_s;
+            step_x <= step_o;
             if (frame) begin
-                v     <= v1;
-                wheel <= wheel1;
-                n     <= n + 3'd1;
+                n <= n + 3'd1;
+                if (crashing) begin
+                    crash <= crash - 6'd1;
+                end else begin
+                    v     <= v1;
+                    wheel <= wheel1;
+                end
             end
             if (step_h)
                 h <= h1;
@@ -316,6 +371,27 @@ module car_state (
                     if (kappa != target)
                         kappa <= (kappa < target) ? kappa + 4'sd1 : kappa - 4'sd1;
                 end
+            end
+            if (step_s) begin
+                slow <= z_under ? far_s : z_next;
+                if (z_under) begin
+                    ones <= (ones == 4'd9) ? 4'd0 : ones + 4'd1;
+                    if (ones == 4'd9)
+                        tens <= (tens == 4'd9) ? 4'd0 : tens + 4'd1;
+                end
+            end
+            if (step_o)
+                onc <= z_under ? far_o : z_next;
+            if (step_x & hit) begin
+                crash <= 6'd63;
+                v     <= 8'd0;
+                wheel <= 3'sd0;
+                h     <= 8'sd0;
+                P     <= 14'sd2048;
+                slow  <= far_s;
+                onc   <= far_o;
+                tens  <= 4'd0;
+                ones  <= 4'd0;
             end
         end
     end
@@ -346,7 +422,9 @@ module line_setup #(
     input  wire signed [7:0]  p,
     input  wire signed [3:0]  kappa,
     output wire [Z_BITS-1:0]  z,
-    output reg  signed [10:0] Ae
+    output reg  signed [10:0] Ae,
+    output wire        [10:0] zs,          // next row's depth, valid when latch is high
+    output wire               latch
 );
     localparam [9:0] HORIZON  = 10'd128;
     localparam [9:0] ROAD_END = 10'd384;     // the dashboard is drawn over the last rows
@@ -418,7 +496,8 @@ module line_setup #(
     // Negative kappa's magnitude is its bit inversion; subtraction is one's
     // complement, so no carry in. z is clamped very near the horizon (s_y < 9).
     wire        sat  = (d[7:4] == 4'd0) & (~d[3] | (d[2:0] == 3'd0));
-    wire [10:0] zs   = sat ? 11'd2047 : q[10:0];
+    assign zs    = sat ? 11'd2047 : q[10:0];
+    assign latch = e_load;
     wire [2:0]  mag  = kappa[2:0] ^ {3{kappa[3]}};
     wire [10:0] term = (e_bit == 2'd0) ? {6'd0, zs[10:6]} :
                        (e_bit == 2'd1) ? {5'd0, zs[10:5]} : {4'd0, zs[10:4]};
@@ -457,6 +536,7 @@ endmodule
 
 module pixel_colour #(parameter WHEEL_FULL = 0) (
     input  wire               clk,
+    input  wire               rst_n,
     input  wire        [9:0]  x,
     input  wire        [9:0]  y,
     input  wire               active,
@@ -464,8 +544,17 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     input  wire signed [10:0] Ae,      // x - centre = x + Ae, set in blanking
     input  wire signed [7:0]  h,       // heading in pixels
     input  wire        [3:0]  d_hi,    // distance >> 5
-    input  wire        [7:0]  v,       // speed, for the bar
     input  wire signed [2:0]  wheel,   // wheel angle, -2..2
+    input  wire        [7:0]  v,       // speed, for the digits
+    input  wire        [10:0] zs,      // next row's depth (with latch)
+    input  wire               latch,
+    input  wire        [10:0] zc_slow, // depth of each car
+    input  wire        [10:0] zc_onc,
+    input  wire               clr_slow,// a car respawned
+    input  wire               clr_onc,
+    input  wire               flash,   // crash stop
+    input  wire        [3:0]  tens,    // score
+    input  wire        [3:0]  ones,
     output reg         [5:0]  rgb
 );
     // colours, RR_GG_BB
@@ -477,8 +566,14 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     localparam [5:0] DASH_COL = 6'b01_01_01;
     localparam [5:0] COCKPIT  = 6'b00_00_01;
     localparam [5:0] MIRROR   = 6'b01_10_11;
-    localparam [5:0] POD_COL  = 6'b00_00_00;
     localparam [5:0] VENT_COL = 6'b10_10_10;
+    localparam [5:0] SLOW_BODY = 6'b00_01_11;
+    localparam [5:0] SLOW_LAMP = 6'b11_00_00;
+    localparam [5:0] ONC_BODY  = 6'b11_11_11;
+    localparam [5:0] ONC_LAMP  = 6'b11_11_00;
+    localparam [5:0] SLOW_SIDE = 6'b00_00_10;
+    localparam [5:0] ONC_SIDE  = 6'b10_10_10;
+    localparam [5:0] PANEL_COL = 6'b00_00_00;
     localparam [5:0] BAR_COL  = 6'b11_10_00;
     localparam [5:0] LINE_COL = 6'b11_11_11;
     localparam [5:0] TARMAC0  = 6'b01_01_01;
@@ -511,10 +606,55 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire [5:0] mh     = {1'b0, tri_w} + (u[6] ? {2'b00, tri_w[4:1]} : 6'd0);
     wire       peak   = ({1'b0, ~y[6:0]} < {2'b00, mh});  // 127 - y < height
 
-    // ---- speed bar: vertical, columns 64-95, v/2 rows up from the bottom row.
-    // Only used on dashboard rows, where 479 - y = 95 - y[6:0] is this slice.
-    wire [6:0] up     = {~y[6] & ~y[5], ~y[6] & y[5], ~y[4:0]};
-    wire       in_bar = (x[9:5] == 5'b00010) && (up < v[7:1]) && y[7];
+    // ---- traffic. Scanning down, the last row with z >= zc is a car's base. Its Ae and s_y are stored there, and
+    // the next frame draws from them, so the car is upright: one width and one
+    // position for all its rows. Written only at the base row, so no second copy.
+    reg on_slow, on_onc;
+    reg signed [10:0] ae_slow, ae_onc;
+    reg        [7:0]  s_slow, s_onc;
+    wire on_slow_next = (zs >= zc_slow);
+    wire on_onc_next  = (zs >= zc_onc);
+    wire base_ok = (y >= 10'd129) && (y <= 10'd382);    // rows 1..254
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            on_slow <= 1'b0;
+            on_onc  <= 1'b0;
+            s_slow  <= 8'd0;
+            s_onc   <= 8'd0;
+            ae_slow <= 11'd0;
+            ae_onc  <= 11'd0;
+        end else begin
+            if (latch) begin
+                on_slow <= on_slow_next;
+                on_onc  <= on_onc_next;
+                if (base_ok && on_slow && !on_slow_next) begin
+                    ae_slow <= Ae;
+                    s_slow  <= s_y;
+                end
+                if (base_ok && on_onc && !on_onc_next) begin
+                    ae_onc <= Ae;
+                    s_onc  <= s_y;
+                end
+            end
+            if (clr_slow) s_slow <= 8'd0;
+            if (clr_onc)  s_onc  <= 8'd0;
+        end
+    end
+
+    // this car's x - lane reference, and |that|; registered with stage 1
+    wire signed [10:0] dc_slow = $signed({1'b0, x}) + ae_slow;
+    wire signed [10:0] dc_onc  = $signed({1'b0, x}) + ae_onc;
+    wire [9:0] da_slow = dc_slow[9:0] ^ {10{dc_slow[10]}};
+    wire [9:0] da_onc  = dc_onc[9:0]  ^ {10{dc_onc[10]}};
+    reg  [9:0] da_slow_q, da_onc_q;
+    reg        neg_slow_q, neg_onc_q;
+
+    wire [7:0] col_a  = {2'b00, s_y[7:2]};
+    wire [7:0] col_b  = {1'b0, s_y[7:1]} + col_a;
+
+    // ---- score, on the dashboard
+    wire [1:0] score_code;
+    score_display score (.clk(clk), .v(v), .x(x), .y(y), .tens(tens), .ones(ones), .code(score_code));
 
     // ---- static interior
     wire [2:0] inner_code;
@@ -537,30 +677,46 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     reg [9:0] d_q;
     reg [1:0] wheel_q;
     reg [2:0] inner_q;
-    reg       peak_q, in_bar_q, active_q;
+    reg [1:0] score_q;
+    reg       left_q;
+    reg       peak_q, active_q;
     always @(posedge clk) begin
         d_q      <= d;
+        left_q   <= dx[10];
+        da_slow_q  <= da_slow;
+        da_onc_q   <= da_onc;
+        neg_slow_q <= dc_slow[10];
+        neg_onc_q  <= dc_onc[10];
+        score_q  <= score_code;
         inner_q  <= inner_code;
         wheel_q  <= WHEEL_FULL ? wheel_code : {1'b0, wheel_code[0]};
         peak_q   <= peak;
-        in_bar_q <= in_bar;
         active_q <= active;
     end
 
     // ---- stage 2
+    wire [1:0] slow_kind;       // 0 none, 1 body, 3 lamp
+    wire [1:0] onc_kind;
+    wire       slow_side, onc_side;
+    car_shape shape_slow (.s(s_slow), .s_y(s_y), .da(da_slow_q), .in_lane(~neg_slow_q),
+                          .road_side(~left_q), .d(d_q), .col_a(col_a), .col_b(col_b),
+                          .kind(slow_kind), .side(slow_side));
+    car_shape shape_onc  (.s(s_onc), .s_y(s_y), .da(da_onc_q), .in_lane(neg_onc_q),
+                          .road_side(left_q), .d(d_q), .col_a(col_a), .col_b(col_b),
+                          .kind(onc_kind), .side(onc_side));
     always @(*) begin
         if (!active_q)
             rgb = 6'b00_00_00;
         else if (wheel_q != 2'd0)
             rgb = (wheel_q == 2'd1) ? WHEEL0 : (wheel_q == 2'd2) ? BAR_COL : WHEEL1;
-        else if (in_bar_q && dash)
+        else if (score_q == 2'd2)
             rgb = BAR_COL;
+        else if (score_q == 2'd1)
+            rgb = PANEL_COL;
         else if (inner_q == 3'd1 || inner_q == 3'd3)
             rgb = COCKPIT;
         else if (inner_q == 3'd2)
             rgb = MIRROR;
-        else if (inner_q == 3'd4)
-            rgb = POD_COL;
         else if (inner_q == 3'd5)
             rgb = VENT_COL;
         else if (sky)
@@ -569,9 +725,17 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
                   (y[6:5] == 2'd1) ? SKY1 :
                   (y[6:5] == 2'd2) ? SKY2 : SKY3;
         else if (dash)
-            rgb = in_bar_q ? BAR_COL : DASH_COL;
+            rgb = DASH_COL;
         else if (s_y == 8'd0)
             rgb = GRASS0;
+        else if (onc_kind != 2'd0)
+            rgb = onc_kind[1] ? ONC_LAMP : ONC_BODY;
+        else if (onc_side)
+            rgb = ONC_SIDE;
+        else if (slow_kind != 2'd0)
+            rgb = slow_kind[1] ? SLOW_LAMP : SLOW_BODY;
+        else if (slow_side)
+            rgb = SLOW_SIDE;
         else if (stripe && d_q < {6'd0, dash_w})
             rgb = LINE_COL;
         else if (d_q < {2'b00, s_y})
@@ -584,6 +748,8 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         // side window: the world, with each colour channel halved
         if (inner_q == 3'd6 && active_q)
             rgb = {1'b0, rgb[5], 1'b0, rgb[3], 1'b0, rgb[1]};
+        if (flash && active_q)
+            rgb[5:4] = 2'b11;
     end
     wire _unused = &{h[7], band[2:0], 1'b0};
 endmodule
@@ -675,7 +841,7 @@ endmodule
 // away from the centre going up: t = y/4 + ~x is -32..-1 on the pillar and
 // >= 0 on the side window beyond it, which needs one adder and no carry in.
 // code: 0 none, 1 roof or pillar, 2 mirror, 3 top of the dashboard,
-//       4 instrument pod, 5 vent slat, 6 side window.
+//       5 vent slat, 6 side window.
 
 module interior (
     input  wire [9:0] x,
@@ -689,15 +855,123 @@ module interior (
     wire window = ~dash & ~roof & ~t[10];
     wire mirror = (x[9:7] == 3'b010) & (y[9:4] == 6'd1);    // rows 16-31
     wire pad    = (y[8:4] == 5'b10110);                     // rows 352-367
-    wire pod    = y[8] & y[7] & (x[9:7] == 3'b000) & (x[6:5] != 2'b00);
-    wire vent   = (y[8:5] == 4'b1101) & (x[9:7] == 3'b100) & (x[6:5] != 2'b11) & y[2];
+    wire vent   = (y[8:5] == 4'b1101) & (x[9:6] == 4'b1001) & (x[5:4] != 2'b11) & y[2];
 
     assign code = mirror        ? 3'd2 :
                   roof | pillar ? 3'd1 :
                   pad           ? 3'd3 :
-                  pod           ? 3'd4 :
                   vent          ? 3'd5 :
                   window        ? 3'd6 : 3'd0;
+endmodule
+
+// ==========================================================================
+// score_display.v
+// ==========================================================================
+// Two pairs of seven-segment digits on the dashboard, rows 384-447: the score at
+// columns 512-575 and the speed (v / 2, 0..96) at columns 64-127. One decoder
+// serves all four digits, since only one is being scanned at a time. Each digit is a 32 x 64 cell of 4 x 8 pixel blocks, cx 0-7 and cy 0-7.
+// code: 0 none, 1 panel, 2 lit segment.
+
+module score_display (
+    input  wire       clk,
+    input  wire [7:0] v,
+    input  wire [9:0] x,
+    input  wire [9:0] y,
+    input  wire [3:0] tens,
+    input  wire [3:0] ones,
+    output wire [1:0] code
+);
+    // speed in BCD by shift-and-add-3, registered: v only changes once a frame
+    reg [7:0] bcd, speed;
+    integer i;
+    always @(*) begin
+        bcd = 8'd0;
+        for (i = 7; i >= 1; i = i - 1) begin
+            if (bcd[3:0] >= 4'd5) bcd[3:0] = bcd[3:0] + 4'd3;
+            if (bcd[7:4] >= 4'd5) bcd[7:4] = bcd[7:4] + 4'd3;
+            bcd = {bcd[6:0], v[i]};
+        end
+    end
+    always @(posedge clk)
+        speed <= bcd;
+
+    wire       right = (x[9:6] == 4'b1000);
+    wire       left  = (x[9:6] == 4'b0001);
+    wire       panel = (right | left) & (y[8:6] == 3'b110);
+    wire [2:0] cx    = x[4:2];
+    wire [2:0] cy    = y[5:3];
+    wire [3:0] digit = right ? (x[5] ? ones : tens) : (x[5] ? speed[3:0] : speed[7:4]);
+
+    reg [6:0] seg;                                          // gfedcba
+    always @(*) begin
+        case (digit)
+            4'd0:    seg = 7'b0111111;
+            4'd1:    seg = 7'b0000110;
+            4'd2:    seg = 7'b1011011;
+            4'd3:    seg = 7'b1001111;
+            4'd4:    seg = 7'b1100110;
+            4'd5:    seg = 7'b1101101;
+            4'd6:    seg = 7'b1111101;
+            4'd7:    seg = 7'b0000111;
+            4'd8:    seg = 7'b1111111;
+            default: seg = 7'b1101111;
+        endcase
+    end
+
+    wire mid   = (cx >= 3'd1) & (cx <= 3'd5);
+    wire upper = (cy >= 3'd1) & (cy <= 3'd3);
+    wire lower = (cy >= 3'd5) & (cy <= 3'd6);
+    wire lit = (seg[0] & mid & (cy == 3'd0)) | (seg[1] & (cx == 3'd6) & upper) |
+               (seg[2] & (cx == 3'd6) & lower) | (seg[3] & mid & (cy == 3'd7)) |
+               (seg[4] & (cx == 3'd0) & lower) | (seg[5] & (cx == 3'd0) & upper) |
+               (seg[6] & mid & (cy == 3'd4));
+
+    assign code = !panel ? 2'd0 : lit ? 2'd2 : 2'd1;
+    wire _unused = &{v[0], 1'b0};
+endmodule
+
+// ==========================================================================
+// car_shape.v
+// ==========================================================================
+// The shape of one upright car in the current row and column: a cuboid. s is
+// the car's base row; its rear face is s/2 wide and 3s/8 tall, with lamps at
+// the outer eighths. The side panel lies just beyond the rear face and stops at
+// the road's ground line for this row, so it vanishes when the car is straight
+// ahead. Purely combinational, in stage 2 of pixel_colour.
+
+module car_shape (
+    input  wire [7:0] s,
+    input  wire [7:0] s_y,
+    input  wire [9:0] da,        // |x - this car's reference|
+    input  wire       in_lane,   // on this car's side of its reference
+    input  wire       road_side, // on this car's side of the road centre
+    input  wire [9:0] d,         // |x - road centre| for this row
+    input  wire [7:0] col_a,     // s_y / 4
+    input  wire [7:0] col_b,     // 3 s_y / 4
+    output wire [1:0] kind,      // 0 none, 1 body, 3 lamp
+    output wire       side
+);
+    wire [7:0] half  = {1'b0, s[7:1]};
+    wire [7:0] a     = {2'b00, s[7:2]};
+    wire [7:0] w     = {3'b000, s[7:3]};
+    wire [7:0] h_w   = half - w;
+    wire [8:0] h_p   = {1'b0, half} + {1'b0, w};
+
+    // everything is measured from the rear face's near edge
+    wire [10:0] u    = {1'b0, da} - {3'b000, a};
+    wire        neg  = u[10];
+    wire        near = (u[10:8] == 3'b000);      // 0 .. 255
+    wire [7:0]  ul   = u[7:0];
+
+    wire rows    = ({1'b0, s_y} >= h_p) && (s_y <= s);
+    wire lt_half = near & (ul < half);
+    wire lamp    = (ul < w) | (ul >= h_w);
+
+    assign kind = {rows & in_lane & lt_half & lamp, rows & in_lane & lt_half};
+
+    wire inner = neg & (u[9:8] == 2'b11) & (~ul < w) & (d >= {2'b00, col_a});
+    wire outer = near & ~lt_half & ({1'b0, ul} < h_p) & (d < {2'b00, col_b});
+    assign side = rows & in_lane & road_side & (inner | outer);
 endmodule
 
 // ==========================================================================

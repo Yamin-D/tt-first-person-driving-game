@@ -21,7 +21,9 @@ module line_setup #(
     input  wire signed [7:0]  p,
     input  wire signed [3:0]  kappa,
     output wire [Z_BITS-1:0]  z,
-    output reg  signed [10:0] Ae
+    output reg  signed [10:0] Ae,
+    output wire        [10:0] zs,          // next row's depth, valid when latch is high
+    output wire               latch
 );
     localparam [9:0] HORIZON  = 10'd128;
     localparam [9:0] ROAD_END = 10'd384;     // the dashboard is drawn over the last rows
@@ -93,7 +95,8 @@ module line_setup #(
     // Negative kappa's magnitude is its bit inversion; subtraction is one's
     // complement, so no carry in. z is clamped very near the horizon (s_y < 9).
     wire        sat  = (d[7:4] == 4'd0) & (~d[3] | (d[2:0] == 3'd0));
-    wire [10:0] zs   = sat ? 11'd2047 : q[10:0];
+    assign zs    = sat ? 11'd2047 : q[10:0];
+    assign latch = e_load;
     wire [2:0]  mag  = kappa[2:0] ^ {3{kappa[3]}};
     wire [10:0] term = (e_bit == 2'd0) ? {6'd0, zs[10:6]} :
                        (e_bit == 2'd1) ? {5'd0, zs[10:5]} : {4'd0, zs[10:4]};

@@ -24,7 +24,6 @@ D_SHIFT  = 5            # stripes use D >> 5 (4 bits)
 FOG_SY   = 32           # no stripes for s_y < 32 (s_y[7:5] == 0)
 V_MAX    = 192
 WHEEL_FULL = True       # False: small wheel for 1x1, True: full wheel for 1x2
-BAR_X0, BAR_X1 = 64, 96 # columns of the vertical speed bar
 ROAD_EDGE, KERB_EDGE = 64, 72   # |p| thresholds (W/H = 1, kerb is w/8)
 
 # curvature wanted in each of the 16 track segments (64 distance wraps each).
@@ -33,6 +32,16 @@ ROAD_EDGE, KERB_EDGE = 64, 72   # |p| thresholds (W/H = 1, kerb is w/8)
 TRACK = [0, 0, 5, 5, 0, -6, -6, 0, 7, -8, 0, -5, -5, 6, 0, 0]
 Z_SAT_SY = 9            # rows with s_y below this use z = 2047
 
+# traffic. Depths are 12 bits with 1 fraction bit: Z >> 1 compares with row depth z.
+LANE_P     = 32         # sideways position of the right lane's centre
+SLOW_STEP  = 6          # per frame, added to the slow car's depth
+ONC_STEP   = -4        # per frame, added to the oncoming car's depth
+FAR_HOLD   = 4032      # the slow car stops drawing away at this depth
+NEAR_Z     = 128        # depths below this can collide
+CRASH_FRAMES = 63
+SEGMENTS = {0: "abcdef", 1: "bc", 2: "abdeg", 3: "abcdg", 4: "bcfg", 5: "acdfg",
+            6: "acdefg", 7: "abc", 8: "abcdefg", 9: "abcdfg"}
+
 # RGB222 colours, written RR_GG_BB
 def c(rr, gg, bb): return (rr << 4) | (gg << 2) | bb
 SKY      = [c(0,0,2), c(0,1,2), c(0,1,3), c(1,2,3)]   # bands of 32 rows
@@ -40,8 +49,11 @@ MOUNTAIN = c(1,1,2)
 DASH_COL = c(1,1,1)
 COCKPIT  = c(0,0,1)     # roof, left pillar, top of the dashboard
 MIRROR   = c(1,2,3)
-POD_COL  = c(0,0,0)
 VENT_COL = c(2,2,2)
+SLOW_BODY, SLOW_LAMP = c(0,1,3), c(3,0,0)
+ONC_BODY,  ONC_LAMP  = c(3,3,3), c(3,3,0)
+SLOW_SIDE, ONC_SIDE = c(0,0,2), c(2,2,2)
+PANEL_COL = c(0,0,0)
 BAR_COL  = c(3,2,0)
 LINE_COL = c(3,3,3)
 TARMAC   = (c(1,1,1), c(2,2,2))     # (stripe=0, stripe=1)
@@ -77,7 +89,11 @@ class Car:
         self.v, self.D, self.n = 0, 0, 0      # 8u speed, 9u distance, 3u frame count
         self.wheel = 0                        # 3s, -2..2
         self.h = 0                            # 8s heading, pixels, about -100..99
-        self.P = 0                            # 14s sideways position, p = P >> 6
+        self.P = LANE_P << P_FRAC             # 14s sideways position, p = P >> 6; right lane
+        self.slow = self.onc = 2048           # 12u depths of the two cars
+        self.crash = 0                        # 6u frames left of the crash stop
+        self.tens = self.ones = 0             # score, cars overtaken, BCD
+        self.cap_slow = self.cap_onc = (0, 0) # (Ae, s_y) of each car's base row
         self.track = 0                        # 10u distance wraps; top 4 bits are the segment
         self.kappa = 0                        # 4s road curvature
 
@@ -97,6 +113,12 @@ class Car:
         the current state and applied with a single adder; the wheel, heading
         and position then use the new speed. Heading and position stop moving
         outwards past +/-96, which keeps every value inside its bit width."""
+        self.cap_slow = base_row(self, self.slow) or self.cap_slow   # from the frame just drawn
+        self.cap_onc = base_row(self, self.onc) or self.cap_onc
+        if self.crash:
+            self.crash -= 1
+            self.n = (self.n + 1) & 0x7
+            return
         v = self.v
         if self.offroad() and v > 96:  d = -4 if brake else -2   # grass drag
         elif accel:        d = 0 if v == V_MAX else 1
@@ -127,6 +149,41 @@ class Car:
                 self.kappa += 1 if self.kappa < target else -1
             self.track = (self.track + 1) & 0x3FF
         self.n = (self.n + 1) & 0x7
+        self.traffic()
+
+    def traffic(self):
+        """After the car has moved: each car's depth changes by one shared adder,
+        then the collision test."""
+        rnd = (self.D & 31) ^ (((self.track & 3) << 3) | self.n)
+        def step(z, k, r):
+            delta = k - (self.v >> 4)
+            if z + delta < 0:                  # passed: respawn far ahead
+                return (1 << 11) | (r << 6), True
+            if delta >= 0 and z >= FAR_HOLD:
+                return z, False
+            return z + delta, False
+        self.slow, passed = step(self.slow, SLOW_STEP, rnd)
+        self.onc, onc_passed = step(self.onc, ONC_STEP, ~rnd & 31)
+        if passed:
+            self.cap_slow = (self.cap_slow[0], 0)
+        if onc_passed:
+            self.cap_onc = (self.cap_onc[0], 0)
+        if passed:
+            self.ones += 1
+            if self.ones == 10:
+                self.ones = 0
+                self.tens = (self.tens + 1) % 10
+        p = self.p
+        hit = (self.slow < NEAR_Z and 0 <= p < 64) or (self.onc < NEAR_Z and -64 <= p < 0)
+        if hit:
+            self.crash = CRASH_FRAMES
+            self.v = self.wheel = self.h = 0
+            self.P = LANE_P << P_FRAC
+            self.slow = (1 << 11) | (rnd << 6)
+            self.onc = (1 << 11) | ((~rnd & 31) << 6)
+            self.tens = self.ones = 0
+            self.cap_slow = (self.cap_slow[0], 0)
+            self.cap_onc = (self.cap_onc[0], 0)
 
 # ---------------------------------------------------------------- curves
 def wrap11(value):
@@ -185,10 +242,78 @@ def wheel_code(wheel, full):
     code[~on] = 0
     return code
 
+# ---------------------------------------------------------------- traffic and score
+RECIP = [0] + [serial_recip(s) for s in range(1, 256)]
+
+def row_depth(s_y):
+    """The depth a row is compared with: z, clamped very near the horizon."""
+    return 2047 if s_y < Z_SAT_SY else RECIP[s_y] & 0x7FF
+
+def base_row(car, Z):
+    """Scanning down, the last row with z >= zc is the car's base; the hardware
+    stores (Ae, s_y) there, and the next frame draws from them. Returns None if
+    no base row was seen in rows 1..254."""
+    zc, found = Z >> 1, None
+    for s in range(1, 255):
+        if row_depth(s) >= zc and row_depth(s + 1) < zc:
+            A = ((car.h - 320) << 6) + car.p * s
+            found = (line_centre(A, RECIP[s], s, car.kappa), s)
+    return found
+
+def draw_cars(row, d, left, s_y, car, now):
+    """Upright cars, one width and position for every row, from the stored base.
+    The side panel lies beyond the rear face and stops at the road's ground line
+    for that row, so it vanishes when the car is straight ahead."""
+    x = np.arange(W_SCREEN)
+    a_row, b_row = s_y >> 2, (s_y >> 1) + (s_y >> 2)
+    for (Ae, s), base, is_left, body, lamp, flank in (
+            (car.cap_slow, now[0], False, SLOW_BODY, SLOW_LAMP, SLOW_SIDE),
+            (car.cap_onc, now[1], True, ONC_BODY, ONC_LAMP, ONC_SIDE)):
+        # below this frame's base row the stored value has already been replaced
+        if base is not None and s_y > base[1]:
+            continue
+        if s_y > s or s_y < (s >> 1) + (s >> 3):        # a cuboid, 3/8 s tall
+            continue
+        dc = ((x + Ae + 1024) & 2047) - 1024
+        da = np.where(dc < 0, ~dc, dc) & 1023
+        lane = (dc < 0) if is_left else (dc >= 0)
+        road_side = left if is_left else ~left
+        a, b, w = s >> 2, (s >> 1) + (s >> 2), s >> 3
+        inner = lane & road_side & (da >= a - w) & (da < a) & (d >= a_row)
+        outer = lane & road_side & (da >= b) & (da < b + w) & (d < b_row)
+        row[inner | outer] = flank
+        face = lane & (da >= a) & (da < b)
+        row[face] = body
+        row[face & ((da < a + w) | (da >= b - w))] = lamp
+
+def score_code(tens, ones, v):
+    """0 none, 1 panel, 2 lit segment, rows 384-447: the score at columns 512-575
+    and the speed, v/2 so 0..96, at columns 64-127."""
+    y_, x_ = np.mgrid[0:H_SCREEN, 0:W_SCREEN]
+    rows = (y_ >= 384) & (y_ < 448)
+    right = (x_ >= 512) & (x_ < 576) & rows
+    left = (x_ >= 64) & (x_ < 128) & rows
+    panel = right | left
+    speed = v >> 1
+    cx, cy = (x_ >> 2) & 7, (y_ >> 3) & 7
+    mid = (cx >= 1) & (cx <= 5)
+    upper, lower = (cy >= 1) & (cy <= 3), (cy >= 5) & (cy <= 6)
+    parts = dict(a=mid & (cy == 0), b=(cx == 6) & upper, c=(cx == 6) & lower, d=mid & (cy == 7),
+                 e=(cx == 0) & lower, f=(cx == 0) & upper, g=mid & (cy == 4))
+    lit = np.zeros_like(x_, dtype=bool)
+    for digit, columns in ((tens, right & (x_ < 544)), (ones, right & (x_ >= 544)),
+                           (speed // 10, left & (x_ < 96)), (speed % 10, left & (x_ >= 96))):
+        for name in SEGMENTS[digit]:
+            lit |= parts[name] & columns
+    code = np.zeros_like(x_)
+    code[panel] = 1
+    code[panel & lit] = 2
+    return code
+
 # ---------------------------------------------------------------- interior
-def interior_code(v):
+def interior_code():
     """Per-pixel interior code: 0 none, 1 roof or pillar, 2 mirror, 3 top of the
-    dashboard, 4 instrument pod, 5 vent slat, 6 side window. We sit on the left,
+    dashboard, 5 vent slat, 6 side window. We sit on the left,
     so only the left has a pillar. t = y/4 + ~x uses one's complement, and the
     pillar is where t is -32..-1 and the window where t >= 0."""
     y_, x_ = np.mgrid[0:H_SCREEN, 0:W_SCREEN]
@@ -199,13 +324,10 @@ def interior_code(v):
     window = ~dash & ~roof & (t >= 0)
     mirror = (x_ >= 256) & (x_ < 384) & (y_ >= 16) & (y_ < 32)
     pad = dash & (y_ < DASH_TOP + 16)
-    pod = (y_ >= 384) & (x_ >= 32) & (x_ < 128)
-    pod &= ~((x_ >= BAR_X0) & (x_ < BAR_X1) & (H_SCREEN - 1 - y_ < v >> 1))   # the bar shows
-    vent = (y_ >= 416) & (y_ < 448) & (x_ >= 512) & (x_ < 608) & ((y_ >> 2) & 1 == 1)
+    vent = (y_ >= 416) & (y_ < 448) & (x_ >= 576) & (x_ < 624) & ((y_ >> 2) & 1 == 1)
     code = np.zeros_like(x_)
     code[window] = 6
     code[vent] = 5
-    code[pod] = 4
     code[pad] = 3
     code[roof | pillar] = 1
     code[mirror] = 2
@@ -220,8 +342,8 @@ def render(car):
     u = (x + car.h) & 0x7F                 # mountain column, wraps every 128 px
     tri = np.where(u & 0x20, 31 - (u & 0x1F), u & 0x1F)        # 0..31 ramp
     mountain_h = tri + np.where(u & 0x40, tri >> 1, 0)          # alternate peaks
-    bar = (x >= BAR_X0) & (x < BAR_X1)
     A = 0
+    bases = (base_row(car, car.slow), base_row(car, car.onc))
     for y in range(H_SCREEN):
         if y < HORIZON:
             row = np.full(W_SCREEN, SKY[y >> 5], np.uint8)
@@ -229,8 +351,6 @@ def render(car):
             img[y] = row
         elif y >= DASH_TOP:
             row = np.full(W_SCREEN, DASH_COL, np.uint8)
-            if H_SCREEN - 1 - y < car.v >> 1:   # v/2 rows up from the bottom
-                row[bar] = BAR_COL
             img[y] = row
         else:
             s_y = y - HORIZON
@@ -249,24 +369,29 @@ def render(car):
                 row[d < w] = TARMAC[stripe]
                 if stripe:
                     row[d < dash_w] = LINE_COL
+                draw_cars(row, d, dx < 0, s_y, car, bases)
                 img[y] = row
         # end-of-line updates at x = 799
         if y == HORIZON - 1:
             A = (car.h - 320) << 6         # centre offset folded into A
         elif HORIZON <= y < DASH_TOP:
             A += car.p
-    inner = interior_code(car.v)
+    inner = interior_code()
     tint = (img >> 1) & 0b01_01_01          # each channel halved
     img[inner == 6] = tint[inner == 6]
     img[inner == 1] = COCKPIT
     img[inner == 2] = MIRROR
     img[inner == 3] = COCKPIT
-    img[inner == 4] = POD_COL
     img[inner == 5] = VENT_COL
+    score = score_code(car.tens, car.ones, car.v)
+    img[score == 1] = PANEL_COL
+    img[score == 2] = BAR_COL
     code = wheel_code(car.wheel, WHEEL_FULL)
     img[code == 1] = WHEEL0
     img[code == 2] = BAR_COL
     img[code == 3] = WHEEL1
+    if car.crash:
+        img |= 0b11_00_00                   # red flash
     return img
 
 def to_rgb(img):
@@ -312,12 +437,27 @@ def random_script(n, seed=1):
         out += [keys] * rng.randint(1, 40)
     return out[:n]
 
-def lap_script(n):
-    """Flat out with simple steering that holds the road, to reach the bends."""
+def crash_script(n):
+    """Hold the right lane flat out, into the slow car."""
     car = Car(); out = []
     for _ in range(n):
-        err = car.h + (car.p >> 1)
+        err = car.h + ((car.p - LANE_P) >> 1)
         keys = dict(accel=1, left=err > 4, right=err < -4)
+        car.frame(**keys)
+        out.append(keys)
+    return out
+
+def lap_script(n):
+    """Drives the bends: keeps right and overtakes when the left lane is clear."""
+    car = Car(); out = []
+    for _ in range(n):
+        blocked = car.slow < 450
+        clear = car.onc > 1750
+        overtaking = blocked and (car.p < 0 or clear)
+        target = -LANE_P if overtaking else LANE_P
+        err = car.h + ((car.p - target) >> 1)
+        keys = dict(accel=overtaking or not blocked, brake=blocked and not overtaking,
+                    left=err > 4, right=err < -4)
         car.frame(**keys)
         out.append(keys)
     return out
@@ -351,7 +491,7 @@ if __name__ == "__main__":
         car.frame(**keys)
         if i % 10 == 0:
             trace.append((i, car.v, car.wheel, car.h, car.p))
-        speeds.append(car.v); offs.append(car.offroad())
+        speeds.append(car.v); offs.append(car.offroad() or car.crash != 0)
         if i % 2 == 0:
             frames.append(Image.fromarray(to_rgb(render(car))).resize((320, 240)))
     frames[0].save("drive.gif", save_all=True, append_images=frames[1:],

@@ -11,6 +11,7 @@
 
 module pixel_colour #(parameter WHEEL_FULL = 0) (
     input  wire               clk,
+    input  wire               rst_n,
     input  wire        [9:0]  x,
     input  wire        [9:0]  y,
     input  wire               active,
@@ -18,8 +19,17 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     input  wire signed [10:0] Ae,      // x - centre = x + Ae, set in blanking
     input  wire signed [7:0]  h,       // heading in pixels
     input  wire        [3:0]  d_hi,    // distance >> 5
-    input  wire        [7:0]  v,       // speed, for the bar
     input  wire signed [2:0]  wheel,   // wheel angle, -2..2
+    input  wire        [7:0]  v,       // speed, for the digits
+    input  wire        [10:0] zs,      // next row's depth (with latch)
+    input  wire               latch,
+    input  wire        [10:0] zc_slow, // depth of each car
+    input  wire        [10:0] zc_onc,
+    input  wire               clr_slow,// a car respawned
+    input  wire               clr_onc,
+    input  wire               flash,   // crash stop
+    input  wire        [3:0]  tens,    // score
+    input  wire        [3:0]  ones,
     output reg         [5:0]  rgb
 );
     // colours, RR_GG_BB
@@ -31,8 +41,14 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     localparam [5:0] DASH_COL = 6'b01_01_01;
     localparam [5:0] COCKPIT  = 6'b00_00_01;
     localparam [5:0] MIRROR   = 6'b01_10_11;
-    localparam [5:0] POD_COL  = 6'b00_00_00;
     localparam [5:0] VENT_COL = 6'b10_10_10;
+    localparam [5:0] SLOW_BODY = 6'b00_01_11;
+    localparam [5:0] SLOW_LAMP = 6'b11_00_00;
+    localparam [5:0] ONC_BODY  = 6'b11_11_11;
+    localparam [5:0] ONC_LAMP  = 6'b11_11_00;
+    localparam [5:0] SLOW_SIDE = 6'b00_00_10;
+    localparam [5:0] ONC_SIDE  = 6'b10_10_10;
+    localparam [5:0] PANEL_COL = 6'b00_00_00;
     localparam [5:0] BAR_COL  = 6'b11_10_00;
     localparam [5:0] LINE_COL = 6'b11_11_11;
     localparam [5:0] TARMAC0  = 6'b01_01_01;
@@ -65,10 +81,55 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire [5:0] mh     = {1'b0, tri_w} + (u[6] ? {2'b00, tri_w[4:1]} : 6'd0);
     wire       peak   = ({1'b0, ~y[6:0]} < {2'b00, mh});  // 127 - y < height
 
-    // ---- speed bar: vertical, columns 64-95, v/2 rows up from the bottom row.
-    // Only used on dashboard rows, where 479 - y = 95 - y[6:0] is this slice.
-    wire [6:0] up     = {~y[6] & ~y[5], ~y[6] & y[5], ~y[4:0]};
-    wire       in_bar = (x[9:5] == 5'b00010) && (up < v[7:1]) && y[7];
+    // ---- traffic. Scanning down, the last row with z >= zc is a car's base. Its Ae and s_y are stored there, and
+    // the next frame draws from them, so the car is upright: one width and one
+    // position for all its rows. Written only at the base row, so no second copy.
+    reg on_slow, on_onc;
+    reg signed [10:0] ae_slow, ae_onc;
+    reg        [7:0]  s_slow, s_onc;
+    wire on_slow_next = (zs >= zc_slow);
+    wire on_onc_next  = (zs >= zc_onc);
+    wire base_ok = (y >= 10'd129) && (y <= 10'd382);    // rows 1..254
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            on_slow <= 1'b0;
+            on_onc  <= 1'b0;
+            s_slow  <= 8'd0;
+            s_onc   <= 8'd0;
+            ae_slow <= 11'd0;
+            ae_onc  <= 11'd0;
+        end else begin
+            if (latch) begin
+                on_slow <= on_slow_next;
+                on_onc  <= on_onc_next;
+                if (base_ok && on_slow && !on_slow_next) begin
+                    ae_slow <= Ae;
+                    s_slow  <= s_y;
+                end
+                if (base_ok && on_onc && !on_onc_next) begin
+                    ae_onc <= Ae;
+                    s_onc  <= s_y;
+                end
+            end
+            if (clr_slow) s_slow <= 8'd0;
+            if (clr_onc)  s_onc  <= 8'd0;
+        end
+    end
+
+    // this car's x - lane reference, and |that|; registered with stage 1
+    wire signed [10:0] dc_slow = $signed({1'b0, x}) + ae_slow;
+    wire signed [10:0] dc_onc  = $signed({1'b0, x}) + ae_onc;
+    wire [9:0] da_slow = dc_slow[9:0] ^ {10{dc_slow[10]}};
+    wire [9:0] da_onc  = dc_onc[9:0]  ^ {10{dc_onc[10]}};
+    reg  [9:0] da_slow_q, da_onc_q;
+    reg        neg_slow_q, neg_onc_q;
+
+    wire [7:0] col_a  = {2'b00, s_y[7:2]};
+    wire [7:0] col_b  = {1'b0, s_y[7:1]} + col_a;
+
+    // ---- score, on the dashboard
+    wire [1:0] score_code;
+    score_display score (.clk(clk), .v(v), .x(x), .y(y), .tens(tens), .ones(ones), .code(score_code));
 
     // ---- static interior
     wire [2:0] inner_code;
@@ -91,30 +152,46 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     reg [9:0] d_q;
     reg [1:0] wheel_q;
     reg [2:0] inner_q;
-    reg       peak_q, in_bar_q, active_q;
+    reg [1:0] score_q;
+    reg       left_q;
+    reg       peak_q, active_q;
     always @(posedge clk) begin
         d_q      <= d;
+        left_q   <= dx[10];
+        da_slow_q  <= da_slow;
+        da_onc_q   <= da_onc;
+        neg_slow_q <= dc_slow[10];
+        neg_onc_q  <= dc_onc[10];
+        score_q  <= score_code;
         inner_q  <= inner_code;
         wheel_q  <= WHEEL_FULL ? wheel_code : {1'b0, wheel_code[0]};
         peak_q   <= peak;
-        in_bar_q <= in_bar;
         active_q <= active;
     end
 
     // ---- stage 2
+    wire [1:0] slow_kind;       // 0 none, 1 body, 3 lamp
+    wire [1:0] onc_kind;
+    wire       slow_side, onc_side;
+    car_shape shape_slow (.s(s_slow), .s_y(s_y), .da(da_slow_q), .in_lane(~neg_slow_q),
+                          .road_side(~left_q), .d(d_q), .col_a(col_a), .col_b(col_b),
+                          .kind(slow_kind), .side(slow_side));
+    car_shape shape_onc  (.s(s_onc), .s_y(s_y), .da(da_onc_q), .in_lane(neg_onc_q),
+                          .road_side(left_q), .d(d_q), .col_a(col_a), .col_b(col_b),
+                          .kind(onc_kind), .side(onc_side));
     always @(*) begin
         if (!active_q)
             rgb = 6'b00_00_00;
         else if (wheel_q != 2'd0)
             rgb = (wheel_q == 2'd1) ? WHEEL0 : (wheel_q == 2'd2) ? BAR_COL : WHEEL1;
-        else if (in_bar_q && dash)
+        else if (score_q == 2'd2)
             rgb = BAR_COL;
+        else if (score_q == 2'd1)
+            rgb = PANEL_COL;
         else if (inner_q == 3'd1 || inner_q == 3'd3)
             rgb = COCKPIT;
         else if (inner_q == 3'd2)
             rgb = MIRROR;
-        else if (inner_q == 3'd4)
-            rgb = POD_COL;
         else if (inner_q == 3'd5)
             rgb = VENT_COL;
         else if (sky)
@@ -123,9 +200,17 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
                   (y[6:5] == 2'd1) ? SKY1 :
                   (y[6:5] == 2'd2) ? SKY2 : SKY3;
         else if (dash)
-            rgb = in_bar_q ? BAR_COL : DASH_COL;
+            rgb = DASH_COL;
         else if (s_y == 8'd0)
             rgb = GRASS0;
+        else if (onc_kind != 2'd0)
+            rgb = onc_kind[1] ? ONC_LAMP : ONC_BODY;
+        else if (onc_side)
+            rgb = ONC_SIDE;
+        else if (slow_kind != 2'd0)
+            rgb = slow_kind[1] ? SLOW_LAMP : SLOW_BODY;
+        else if (slow_side)
+            rgb = SLOW_SIDE;
         else if (stripe && d_q < {6'd0, dash_w})
             rgb = LINE_COL;
         else if (d_q < {2'b00, s_y})
@@ -138,6 +223,8 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         // side window: the world, with each colour channel halved
         if (inner_q == 3'd6 && active_q)
             rgb = {1'b0, rgb[5], 1'b0, rgb[3], 1'b0, rgb[1]};
+        if (flash && active_q)
+            rgb[5:4] = 2'b11;
     end
     wire _unused = &{h[7], band[2:0], 1'b0};
 endmodule

@@ -49,25 +49,35 @@ module tt_um_road_racer #(
     wire        [8:0] D;
     wire              offroad;
     wire signed [3:0] kappa;
+    wire       [11:0] slow, onc;
+    wire              clr_slow, clr_onc;
+    wire              flash;
+    wire        [3:0] tens, ones;
     car_state car (
         .clk(clk), .rst_n(rst_q), .frame(frame),
         .left(btn[0]), .right(btn[1]), .accel(btn[2]), .brake(btn[3]),
-        .v(v), .wheel(wheel), .h(h), .p(p), .D(D), .offroad(offroad), .kappa(kappa)
+        .v(v), .wheel(wheel), .h(h), .p(p), .D(D), .offroad(offroad), .kappa(kappa),
+        .slow(slow), .onc(onc), .clr_slow(clr_slow), .clr_onc(clr_onc), .flash(flash),
+        .tens(tens), .ones(ones)
     );
 
     // ---- per-line values
     wire        [10:0] z;
     wire signed [10:0] Ae;
+    wire        [10:0] zs;
+    wire               z_latch;
     line_setup #(.Z_BITS(11)) line (
         .clk(clk), .rst_n(rst_q), .x(x), .y(y), .h(h), .p(p),
-        .kappa(kappa), .z(z), .Ae(Ae)
+        .kappa(kappa), .z(z), .Ae(Ae), .zs(zs), .latch(z_latch)
     );
 
     // ---- per-pixel colour
     wire [5:0] rgb;
     pixel_colour #(.WHEEL_FULL(WHEEL_FULL)) pix (
-        .clk(clk), .x(x), .y(y), .active(active), .z(z[3:0]), .Ae(Ae), .h(h),
-        .d_hi(D[8:5]), .v(v), .wheel(wheel), .rgb(rgb)
+        .clk(clk), .rst_n(rst_q), .x(x), .y(y), .active(active), .z(z[3:0]), .Ae(Ae), .h(h),
+        .d_hi(D[8:5]), .wheel(wheel), .v(v), .zs(zs), .latch(z_latch),
+        .zc_slow(slow[11:1]), .zc_onc(onc[11:1]), .clr_slow(clr_slow), .clr_onc(clr_onc),
+        .flash(flash), .tens(tens), .ones(ones), .rgb(rgb)
     );
 
     // ---- sound
@@ -75,7 +85,7 @@ module tt_um_road_racer #(
     wire       audio;
     engine_audio engine (
         .clk(clk), .rst_n(rst_q), .tick(line_end), .v(v),
-        .offroad(offroad), .pwm_count(x[7:0]), .sample(sample), .out(audio)
+        .offroad(offroad | flash), .pwm_count(x[7:0]), .sample(sample), .out(audio)
     );
 
     // ---- outputs, registered so every pin changes on the same clock edge.
@@ -94,5 +104,5 @@ module tt_um_road_racer #(
     assign uio_out = {7'b0000000, audio};
     assign uio_oe  = 8'b0000_0001;
 
-    wire _unused = &{ena, uio_in, ui_in[7:4], D[4:0], frame, sample, 1'b0};
+    wire _unused = &{ena, uio_in, ui_in[7:4], D[4:0], z[10:4], slow[0], onc[0], frame, sample, 1'b0};
 endmodule

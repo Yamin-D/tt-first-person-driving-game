@@ -15,7 +15,7 @@ os.makedirs(BUILD, exist_ok=True)
 
 srcs = [os.path.join(ROOT, "rtl", f) for f in
         ["project.v", "vga_timing.v", "ip_input_sync.v", "car_state.v",
-         "line_setup.v", "pixel_colour.v", "steering_wheel.v", "interior.v", "engine_audio.v"]]
+         "line_setup.v", "pixel_colour.v", "steering_wheel.v", "interior.v", "score_display.v", "car_shape.v", "engine_audio.v"]]
 if os.environ.get("ROAD_SRC") == "project":       # test the generated src/project.v
     import re
     text = open(os.path.join(ROOT, "..", "src", "project.v")).read()
@@ -54,11 +54,20 @@ def coverage_frames(script):
             first.setdefault("top speed", i + 1)
         if car.kappa in (-8, 7):
             first.setdefault(("kappa", car.kappa), i + 1)
+        if car.slow < 375:
+            first.setdefault("slow car near", i + 1)
+        if car.onc < 375:
+            first.setdefault("oncoming car near", i + 1)
+        if car.crash:
+            first.setdefault("crash", i + 1)
+        if car.tens or car.ones:
+            first.setdefault("score", i + 1)
     return first
 
 runs = [("drive", m.drive_script(), [0, 1, 64, 131, 140, 150, 166, 175, 200, 215, 240, 290, 305]),
         ("random", m.random_script(1200), None),
-        ("laps", m.lap_script(1900), [])]
+        ("laps", m.lap_script(3000), []),
+        ("crash", m.crash_script(1000), [])]
 failures = 0; outs = []; covered = set()
 for name, script, check in runs:
     if check is None:
@@ -89,7 +98,8 @@ for name, script, check in runs:
             Image.fromarray(m.to_rgb(hw)).save(os.path.join(BUILD, "chip_frame_150.png"))
     out = "".join(outs)
 
-missing = {("wheel", w) for w in range(-2, 3)} | {"top speed", ("kappa", -8), ("kappa", 7)}
+missing = {("wheel", w) for w in range(-2, 3)} | {"top speed", ("kappa", -8), ("kappa", 7),
+                                                     "slow car near", "oncoming car near", "crash", "score"}
 missing -= covered
 print("coverage missing:", sorted(map(str, missing)) or "none")
 ok = not missing and failures == 0 and all("sync errors: 0" in o and "uio_oe errors: 0" in o for o in outs)
