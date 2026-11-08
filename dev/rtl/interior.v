@@ -1,6 +1,6 @@
 // The static inside of the car, tested per pixel from the screen counters.
 // We sit on the left, so only the left has a pillar. The pillar's edge moves
-// away from the centre going up: t = y/4 + ~x is -32..-1 on the pillar and
+// away from the centre going up: t = y/4 + ~x is -48..-1 on the pillar and
 // >= 0 on the side window beyond it, which needs one adder and no carry in.
 // code: 0 none, 1 roof or pillar, 2 mirror, 3 top of the dashboard,
 //       5 vent slat, 6 side window.
@@ -14,7 +14,7 @@ module interior (
     wire [10:0] t = {4'b0000, y[8:2]} + ~{1'b0, x};
     wire dash   = y[8] & (y[7] | (y[6] & y[5]));            // y >= 352
     wire roof   = (y[9:4] == 6'd0);                         // y < 16
-    wire pillar = ~dash & (t[10:5] == 6'b111111);
+    wire pillar = ~dash & (t[10:6] == 5'b11111) & (t[5:4] != 2'b00);
     wire window = ~dash & ~roof & ~t[10];
     wire mirror = (x[9:7] == 3'b010) & (y[9:4] == 6'd1);    // rows 16-31
     wire pad    = (y[8:4] == 5'b10110);                     // rows 352-367

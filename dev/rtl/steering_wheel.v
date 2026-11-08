@@ -33,7 +33,6 @@ module steering_wheel #(parameter FULL = 0) (
         wire [7:0] dy = {y[7] ^ y[6],    ~y[6], y[5:0]};    // -128..31
         wire [6:0] a  = dx[6:0] ^ {7{dx[7]}};
         wire [6:0] b  = dy[6:0] ^ {7{dy[7]}};
-        wire [7:0] s  = a + b;
 
         // marker on the top of the rim, 16 px wide, centred on dx = 16 w
         wire [4:0] m       = dx[7:3] - {w[2], w, 1'b0};
@@ -46,12 +45,10 @@ module steering_wheel #(parameter FULL = 0) (
         wire [7:0] sv = dx + (ty ^ {8{negative}});          // lower spoke
 
         reg [6:0] a_q;
-        reg [7:0] s_q;
         reg [4:0] sh_q, sv_q;
         reg       on_q, mark_q;
         always @(posedge clk) begin
             a_q     <= a;
-            s_q     <= s;
             on_q    <= on;
             mark_q  <= mark_at;
             sh_q    <= sh[7:3];
@@ -62,7 +59,8 @@ module steering_wheel #(parameter FULL = 0) (
         wire sp_v = ((sv_q == 5'd0) | (sv_q == 5'b11111)) & ~dy[7];
         wire spoke_q = sp_h | sp_v;
 
-        // a, b < 128 from their widths
+        // a, b < 128 from their widths. b only changes between lines.
+        wire [7:0] s_q = a_q + b;
         wire in_out = (s_q < 8'd181);
         wire in_in  = (a_q < 7'd112) & (b < 7'd112) & (s_q < 8'd158);
         wire rim    = in_out & ~in_in;

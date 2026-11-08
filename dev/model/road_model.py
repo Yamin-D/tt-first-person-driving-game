@@ -316,12 +316,12 @@ def interior_code():
     """Per-pixel interior code: 0 none, 1 roof or pillar, 2 mirror, 3 top of the
     dashboard, 5 vent slat, 6 side window. We sit on the left,
     so only the left has a pillar. t = y/4 + ~x uses one's complement, and the
-    pillar is where t is -32..-1 and the window where t >= 0."""
+    pillar is where t is -48..-1 and the window where t >= 0."""
     y_, x_ = np.mgrid[0:H_SCREEN, 0:W_SCREEN]
     t = (y_ >> 2) + ~x_
     dash = y_ >= DASH_TOP
     roof = y_ < 16
-    pillar = ~dash & (t >= -32) & (t < 0)
+    pillar = ~dash & (t >= -48) & (t < 0)
     window = ~dash & ~roof & (t >= 0)
     mirror = (x_ >= 256) & (x_ < 384) & (y_ >= 16) & (y_ < 32)
     pad = dash & (y_ < DASH_TOP + 16)
