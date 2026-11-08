@@ -145,7 +145,7 @@ class Car:
         self.D = total & 0x1FF
         if total > 0x1FF:                     # every 512 units of distance
             target = TRACK[self.track >> 6]
-            if self.kappa != target:
+            if self.kappa != target and self.track & 3 == 0:   # eases in: every 4 wraps
                 self.kappa += 1 if self.kappa < target else -1
             self.track = (self.track + 1) & 0x3FF
         self.n = (self.n + 1) & 0x7
@@ -354,7 +354,8 @@ def render(car):
             img[y] = row
         else:
             s_y = y - HORIZON
-            if s_y == 0:                   # horizon row: far grass
+            mag = (~car.kappa if car.kappa < 0 else car.kappa) & 7
+            if s_y == 0 or (s_y < Z_SAT_SY and mag):   # horizon, or a curve out of sight
                 img[y] = GRASS[0]
             else:
                 z = serial_recip(s_y)      # computed in previous line's hblank

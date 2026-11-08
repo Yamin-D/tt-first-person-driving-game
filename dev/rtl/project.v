@@ -77,7 +77,7 @@ module tt_um_road_racer #(
         .clk(clk), .rst_n(rst_q), .x(x), .y(y), .active(active), .z(z[3:0]), .Ae(Ae), .h(h),
         .d_hi(D[8:5]), .wheel(wheel), .v(v), .zs(zs), .latch(z_latch),
         .zc_slow(slow[11:1]), .zc_onc(onc[11:1]), .clr_slow(clr_slow), .clr_onc(clr_onc),
-        .flash(flash), .tens(tens), .ones(ones), .rgb(rgb)
+        .flash(flash), .kappa(kappa), .tens(tens), .ones(ones), .rgb(rgb)
     );
 
     // ---- sound

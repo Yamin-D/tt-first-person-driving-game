@@ -28,6 +28,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     input  wire               clr_slow,// a car respawned
     input  wire               clr_onc,
     input  wire               flash,   // crash stop
+    input  wire signed [3:0]  kappa,   // road curvature
     input  wire        [3:0]  tens,    // score
     input  wire        [3:0]  ones,
     output reg         [5:0]  rgb
@@ -195,6 +196,11 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     end
 
     // ---- stage 2
+    // when the road curves, its last rows are grass: it bends out of sight
+    reg curved;
+    always @(posedge clk)
+        curved <= (kappa[2:0] ^ {3{kappa[3]}}) != 3'd0;
+    wire near_horizon = (s_y[7:4] == 4'd0) & (~s_y[3] | (s_y[2:0] == 3'd0));
     wire [1:0] slow_kind;       // 0 none, 1 body, 3 lamp
     wire [1:0] onc_kind;
     wire       slow_side, onc_side;
@@ -226,7 +232,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
                   (y_q[6:5] == 2'd2) ? SKY2 : SKY3;
         else if (dash)
             rgb = DASH_COL;
-        else if (s_y == 8'd0)
+        else if ((s_y == 8'd0) || (near_horizon && curved))
             rgb = GRASS0;
         else if (onc_kind != 2'd0)
             rgb = onc_kind[1] ? ONC_LAMP : ONC_BODY;

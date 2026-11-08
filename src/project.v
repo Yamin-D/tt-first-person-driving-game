@@ -82,7 +82,7 @@ module tt_um_yamin_d_first_person_driving_game #(
         .clk(clk), .rst_n(rst_q), .x(x), .y(y), .active(active), .z(z[3:0]), .Ae(Ae), .h(h),
         .d_hi(D[8:5]), .wheel(wheel), .v(v), .zs(zs), .latch(z_latch),
         .zc_slow(slow[11:1]), .zc_onc(onc[11:1]), .clr_slow(clr_slow), .clr_onc(clr_onc),
-        .flash(flash), .tens(tens), .ones(ones), .rgb(rgb)
+        .flash(flash), .kappa(kappa), .tens(tens), .ones(ones), .rgb(rgb)
     );
 
     // ---- sound
@@ -267,7 +267,10 @@ module car_state (
     always @(posedge clk)
         sel_o <= step_s;
     wire        [11:0] z_now = sel_o ? onc : slow;
-    wire signed  [5:0] delta = (sel_o ? -6'sd4 : 6'sd6) - {2'b00, v[7:4]};
+    // registered one clock ahead: v arrives from a heavily loaded net
+    reg  signed  [5:0] delta;
+    always @(posedge clk)
+        delta <= (step_s ? -6'sd4 : 6'sd6) - {2'b00, v[7:4]};
     wire        [12:0] z_sum = {1'b0, z_now} + {{7{delta[5]}}, delta};
     wire               z_under = z_sum[12];              // passed: respawn
     wire               z_hold  = ~delta[5] & (z_now[11:6] == 6'b111111);
@@ -328,9 +331,10 @@ module car_state (
     wire signed [13:0] P1    = P_stop ? P : P + dP;
 
     // Reset reaches about 150 registers here, so each half has a local copy.
-    reg rst_car, rst_traffic;
+    reg rst_car, rst_traffic, rst_pos;
     always @(posedge clk) begin
         rst_car     <= rst_n;
+        rst_pos     <= rst_n;
         rst_traffic <= rst_n;
     end
 
@@ -338,9 +342,6 @@ module car_state (
         if (!rst_car) begin
             v      <= 8'd0;
             wheel  <= 3'sd0;
-            h      <= 8'sd0;
-            P      <= 14'sd2048;           // right lane
-            D      <= 9'd0;
             n      <= 3'd0;
             track  <= 10'd0;
             kappa  <= 4'sd0;
@@ -367,14 +368,10 @@ module car_state (
                     wheel <= wheel1;
                 end
             end
-            if (step_h)
-                h <= h1;
             if (step_p) begin
-                P <= P1;
-                D <= D_sum[8:0];
                 if (D_sum[9]) begin
                     track <= track + 10'd1;
-                    if (kappa != target)
+                    if ((kappa != target) && (track[1:0] == 2'd0))   // eases in
                         kappa <= (kappa < target) ? kappa + 4'sd1 : kappa - 4'sd1;
                 end
             end
@@ -382,8 +379,25 @@ module car_state (
                 crash <= 6'd63;
                 v     <= 8'd0;
                 wheel <= 3'sd0;
-                h     <= 8'sd0;
-                P     <= 14'sd2048;
+            end
+        end
+    end
+
+    always @(posedge clk) begin
+        if (!rst_pos) begin
+            h <= 8'sd0;
+            P <= 14'sd2048;                // right lane
+            D <= 9'd0;
+        end else begin
+            if (step_h)
+                h <= h1;
+            if (step_p) begin
+                P <= P1;
+                D <= D_sum[8:0];
+            end
+            if (step_x & hit) begin
+                h <= 8'sd0;
+                P <= 14'sd2048;
             end
         end
     end
@@ -578,6 +592,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     input  wire               clr_slow,// a car respawned
     input  wire               clr_onc,
     input  wire               flash,   // crash stop
+    input  wire signed [3:0]  kappa,   // road curvature
     input  wire        [3:0]  tens,    // score
     input  wire        [3:0]  ones,
     output reg         [5:0]  rgb
@@ -745,6 +760,11 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     end
 
     // ---- stage 2
+    // when the road curves, its last rows are grass: it bends out of sight
+    reg curved;
+    always @(posedge clk)
+        curved <= (kappa[2:0] ^ {3{kappa[3]}}) != 3'd0;
+    wire near_horizon = (s_y[7:4] == 4'd0) & (~s_y[3] | (s_y[2:0] == 3'd0));
     wire [1:0] slow_kind;       // 0 none, 1 body, 3 lamp
     wire [1:0] onc_kind;
     wire       slow_side, onc_side;
@@ -776,7 +796,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
                   (y_q[6:5] == 2'd2) ? SKY2 : SKY3;
         else if (dash)
             rgb = DASH_COL;
-        else if (s_y == 8'd0)
+        else if ((s_y == 8'd0) || (near_horizon && curved))
             rgb = GRASS0;
         else if (onc_kind != 2'd0)
             rgb = onc_kind[1] ? ONC_LAMP : ONC_BODY;
