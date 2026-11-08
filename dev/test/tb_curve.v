@@ -32,7 +32,7 @@ module tb_curve;
             kappa = ik;
             for (row = 127; row <= 382; row = row + 1) begin
                 y = row;
-                for (k = 638; k < 662; k = k + 1) begin
+                for (k = 638; k < 666; k = k + 1) begin
                     x = k;
                     @(posedge clk); #1;
                 end

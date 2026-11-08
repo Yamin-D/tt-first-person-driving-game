@@ -40,16 +40,18 @@ module line_setup #(
     reg start;                    // high at x = 640 on rows 128..382
     reg a_load;                   // high at x = 640 on row 127
     reg a_add;                    // high at x = 640 on rows 128..383
-    reg e_load;                   // high at x = 656, once z is ready
-    reg e_step;                   // high at x = 658..660
-    reg [1:0] e_bit;              // 0, 1, 2 at x = 657..659, one clock before e_step
+    reg z_ready;                  // high at x = 656, once z is ready
+    reg e_load;                   // high at x = 658, after the old Ae has been used
+    reg e_step;                   // high at x = 660..662
+    reg [1:0] e_bit;              // 0, 1, 2 at x = 659..661, one clock before e_step
     always @(posedge clk) begin
         start  <= (x == 10'd639) && (y >= HORIZON) && (y < ROAD_END - 10'd1);
         a_load <= (x == 10'd639) && (y == HORIZON - 10'd1);
         a_add  <= (x == 10'd639) && (y >= HORIZON) && (y < ROAD_END);
-        e_load <= (x == 10'd655);
-        e_step <= (x >= 10'd657) && (x < 10'd660);
-        e_bit  <= x[1:0];
+        z_ready <= (x == 10'd655);
+        e_load <= (x == 10'd657);
+        e_step <= (x >= 10'd659) && (x < 10'd662);
+        e_bit  <= x[1:0] + 2'd2;
     end
 
     reg [7:0]  r;                 // remainder, always < d after a step
@@ -96,7 +98,7 @@ module line_setup #(
     // complement, so no carry in. z is clamped very near the horizon (s_y < 9).
     wire        sat  = (d[7:4] == 4'd0) & (~d[3] | (d[2:0] == 3'd0));
     assign zs    = sat ? 11'd2047 : q[10:0];
-    assign latch = e_load;
+    assign latch = z_ready;
     wire [2:0]  mag  = kappa[2:0] ^ {3{kappa[3]}};
     wire [10:0] term = (e_bit == 2'd0) ? {6'd0, zs[10:6]} :
                        (e_bit == 2'd1) ? {5'd0, zs[10:5]} : {4'd0, zs[10:4]};

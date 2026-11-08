@@ -7,29 +7,26 @@
 
 module car_shape (
     input  wire [7:0] s,
-    input  wire [7:0] s_y,
-    input  wire [9:0] da,        // |x - this car's reference|
+    input  wire       rows,      // this row is inside the car, registered
+    input  wire [10:0] u,        // |x - this car's reference| - s/4, registered
     input  wire       in_lane,   // on this car's side of its reference
     input  wire       road_side, // on this car's side of the road centre
     input  wire [9:0] d,         // |x - road centre| for this row
     input  wire [7:0] col_a,     // s_y / 4
-    input  wire [7:0] col_b,     // 3 s_y / 4
+    input  wire [7:0] col_b,     // 3 s_y / 4, registered
     output wire [1:0] kind,      // 0 none, 1 body, 3 lamp
     output wire       side
 );
     wire [7:0] half  = {1'b0, s[7:1]};
-    wire [7:0] a     = {2'b00, s[7:2]};
     wire [7:0] w     = {3'b000, s[7:3]};
     wire [7:0] h_w   = half - w;
     wire [8:0] h_p   = {1'b0, half} + {1'b0, w};
 
     // everything is measured from the rear face's near edge
-    wire [10:0] u    = {1'b0, da} - {3'b000, a};
     wire        neg  = u[10];
     wire        near = (u[10:8] == 3'b000);      // 0 .. 255
     wire [7:0]  ul   = u[7:0];
 
-    wire rows    = ({1'b0, s_y} >= h_p) && (s_y <= s);
     wire lt_half = near & (ul < half);
     wire lamp    = (ul < w) | (ul >= h_w);
 

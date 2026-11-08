@@ -441,16 +441,18 @@ module line_setup #(
     reg start;                    // high at x = 640 on rows 128..382
     reg a_load;                   // high at x = 640 on row 127
     reg a_add;                    // high at x = 640 on rows 128..383
-    reg e_load;                   // high at x = 656, once z is ready
-    reg e_step;                   // high at x = 658..660
-    reg [1:0] e_bit;              // 0, 1, 2 at x = 657..659, one clock before e_step
+    reg z_ready;                  // high at x = 656, once z is ready
+    reg e_load;                   // high at x = 658, after the old Ae has been used
+    reg e_step;                   // high at x = 660..662
+    reg [1:0] e_bit;              // 0, 1, 2 at x = 659..661, one clock before e_step
     always @(posedge clk) begin
         start  <= (x == 10'd639) && (y >= HORIZON) && (y < ROAD_END - 10'd1);
         a_load <= (x == 10'd639) && (y == HORIZON - 10'd1);
         a_add  <= (x == 10'd639) && (y >= HORIZON) && (y < ROAD_END);
-        e_load <= (x == 10'd655);
-        e_step <= (x >= 10'd657) && (x < 10'd660);
-        e_bit  <= x[1:0];
+        z_ready <= (x == 10'd655);
+        e_load <= (x == 10'd657);
+        e_step <= (x >= 10'd659) && (x < 10'd662);
+        e_bit  <= x[1:0] + 2'd2;
     end
 
     reg [7:0]  r;                 // remainder, always < d after a step
@@ -497,7 +499,7 @@ module line_setup #(
     // complement, so no carry in. z is clamped very near the horizon (s_y < 9).
     wire        sat  = (d[7:4] == 4'd0) & (~d[3] | (d[2:0] == 3'd0));
     assign zs    = sat ? 11'd2047 : q[10:0];
-    assign latch = e_load;
+    assign latch = z_ready;
     wire [2:0]  mag  = kappa[2:0] ^ {3{kappa[3]}};
     wire [10:0] term = (e_bit == 2'd0) ? {6'd0, zs[10:6]} :
                        (e_bit == 2'd1) ? {5'd0, zs[10:5]} : {4'd0, zs[10:4]};
@@ -586,9 +588,15 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     localparam [5:0] WHEEL1   = 6'b10_10_10;
 
     // ---- regions, as bit slices of y (y < 480)
-    wire sky  = (y[9:7] == 3'b000);                 // y < 128
-    wire dash = y[8] & (y[7] | (y[6] & y[5]));      // y >= 352
-    wire [7:0] s_y = {~y[7], y[6:0]};               // y - 128, valid on road rows
+    // Stage 2 works on the pixel one clock earlier, so it can use a local copy
+    // of y. That takes most of the load off the y counter.
+    reg [9:0] y_q;
+    always @(posedge clk)
+        y_q <= y;
+    wire sky  = (y_q[9:7] == 3'b000);                 // y < 128
+    wire dash = y_q[8] & (y_q[7] | (y_q[6] & y_q[5]));// y >= 352
+    wire [7:0] s_y = {~y_q[7], y_q[6:0]};             // y - 128, valid on road rows
+    wire [7:0] s_now = {~y[7], y[6:0]};               // the same one clock sooner
 
     // ---- road geometry for this line (w = s_y)
     wire [8:0] kerb_w = {1'b0, s_y} + {4'b0000, s_y[7:3]};
@@ -614,7 +622,12 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     reg        [7:0]  s_slow, s_onc;
     wire on_slow_next = (zs >= zc_slow);
     wire on_onc_next  = (zs >= zc_onc);
-    wire base_ok = (y >= 10'd129) && (y <= 10'd382);    // rows 1..254
+    reg  base_ok, cap_slow, cap_onc;
+    always @(posedge clk) begin
+        base_ok  <= (y >= 10'd129) && (y <= 10'd382);   // rows 1..254
+        cap_slow <= latch && base_ok && on_slow && !on_slow_next;
+        cap_onc  <= latch && base_ok && on_onc  && !on_onc_next;
+    end
     always @(posedge clk) begin
         if (!rst_n) begin
             on_slow <= 1'b0;
@@ -627,14 +640,14 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
             if (latch) begin
                 on_slow <= on_slow_next;
                 on_onc  <= on_onc_next;
-                if (base_ok && on_slow && !on_slow_next) begin
-                    ae_slow <= Ae;
-                    s_slow  <= s_y;
-                end
-                if (base_ok && on_onc && !on_onc_next) begin
-                    ae_onc <= Ae;
-                    s_onc  <= s_y;
-                end
+            end
+            if (cap_slow) begin
+                ae_slow <= Ae;
+                s_slow  <= s_y;
+            end
+            if (cap_onc) begin
+                ae_onc <= Ae;
+                s_onc  <= s_y;
             end
             if (clr_slow) s_slow <= 8'd0;
             if (clr_onc)  s_onc  <= 8'd0;
@@ -646,11 +659,22 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire signed [10:0] dc_onc  = $signed({1'b0, x}) + ae_onc;
     wire [9:0] da_slow = dc_slow[9:0] ^ {10{dc_slow[10]}};
     wire [9:0] da_onc  = dc_onc[9:0]  ^ {10{dc_onc[10]}};
-    reg  [9:0] da_slow_q, da_onc_q;
+    wire [10:0] u_slow = {1'b0, da_slow} - {3'b000, s_slow[7:2]};
+    wire [10:0] u_onc  = {1'b0, da_onc}  - {3'b000, s_onc[7:2]};
+    reg  [10:0] u_slow_q, u_onc_q;
+    // row tests for the next pixel stage, from y one clock sooner
+    reg rows_slow_q, rows_onc_q;
+    reg [7:0] col_b_q;
+    wire [8:0] top_slow = {2'b00, s_slow[7:1]} + {4'b0000, s_slow[7:3]};
+    wire [8:0] top_onc  = {2'b00, s_onc[7:1]}  + {4'b0000, s_onc[7:3]};
+    always @(posedge clk) begin
+        rows_slow_q <= ({1'b0, s_now} >= top_slow) && (s_now <= s_slow);
+        rows_onc_q  <= ({1'b0, s_now} >= top_onc)  && (s_now <= s_onc);
+        col_b_q     <= {1'b0, s_now[7:1]} + {2'b00, s_now[7:2]};
+    end
     reg        neg_slow_q, neg_onc_q;
 
     wire [7:0] col_a  = {2'b00, s_y[7:2]};
-    wire [7:0] col_b  = {1'b0, s_y[7:1]} + col_a;
 
     // ---- score, on the dashboard
     wire [1:0] score_code;
@@ -683,8 +707,8 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     always @(posedge clk) begin
         d_q      <= d;
         left_q   <= dx[10];
-        da_slow_q  <= da_slow;
-        da_onc_q   <= da_onc;
+        u_slow_q   <= u_slow;
+        u_onc_q    <= u_onc;
         neg_slow_q <= dc_slow[10];
         neg_onc_q  <= dc_onc[10];
         score_q  <= score_code;
@@ -698,11 +722,11 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire [1:0] slow_kind;       // 0 none, 1 body, 3 lamp
     wire [1:0] onc_kind;
     wire       slow_side, onc_side;
-    car_shape shape_slow (.s(s_slow), .s_y(s_y), .da(da_slow_q), .in_lane(~neg_slow_q),
-                          .road_side(~left_q), .d(d_q), .col_a(col_a), .col_b(col_b),
+    car_shape shape_slow (.s(s_slow), .rows(rows_slow_q), .u(u_slow_q), .in_lane(~neg_slow_q),
+                          .road_side(~left_q), .d(d_q), .col_a(col_a), .col_b(col_b_q),
                           .kind(slow_kind), .side(slow_side));
-    car_shape shape_onc  (.s(s_onc), .s_y(s_y), .da(da_onc_q), .in_lane(neg_onc_q),
-                          .road_side(left_q), .d(d_q), .col_a(col_a), .col_b(col_b),
+    car_shape shape_onc  (.s(s_onc), .rows(rows_onc_q), .u(u_onc_q), .in_lane(neg_onc_q),
+                          .road_side(left_q), .d(d_q), .col_a(col_a), .col_b(col_b_q),
                           .kind(onc_kind), .side(onc_side));
     always @(*) begin
         if (!active_q)
@@ -721,9 +745,9 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
             rgb = VENT_COL;
         else if (sky)
             rgb = peak_q ? MOUNTAIN :
-                  (y[6:5] == 2'd0) ? SKY0 :
-                  (y[6:5] == 2'd1) ? SKY1 :
-                  (y[6:5] == 2'd2) ? SKY2 : SKY3;
+                  (y_q[6:5] == 2'd0) ? SKY0 :
+                  (y_q[6:5] == 2'd1) ? SKY1 :
+                  (y_q[6:5] == 2'd2) ? SKY2 : SKY3;
         else if (dash)
             rgb = DASH_COL;
         else if (s_y == 8'd0)
@@ -941,29 +965,26 @@ endmodule
 
 module car_shape (
     input  wire [7:0] s,
-    input  wire [7:0] s_y,
-    input  wire [9:0] da,        // |x - this car's reference|
+    input  wire       rows,      // this row is inside the car, registered
+    input  wire [10:0] u,        // |x - this car's reference| - s/4, registered
     input  wire       in_lane,   // on this car's side of its reference
     input  wire       road_side, // on this car's side of the road centre
     input  wire [9:0] d,         // |x - road centre| for this row
     input  wire [7:0] col_a,     // s_y / 4
-    input  wire [7:0] col_b,     // 3 s_y / 4
+    input  wire [7:0] col_b,     // 3 s_y / 4, registered
     output wire [1:0] kind,      // 0 none, 1 body, 3 lamp
     output wire       side
 );
     wire [7:0] half  = {1'b0, s[7:1]};
-    wire [7:0] a     = {2'b00, s[7:2]};
     wire [7:0] w     = {3'b000, s[7:3]};
     wire [7:0] h_w   = half - w;
     wire [8:0] h_p   = {1'b0, half} + {1'b0, w};
 
     // everything is measured from the rear face's near edge
-    wire [10:0] u    = {1'b0, da} - {3'b000, a};
     wire        neg  = u[10];
     wire        near = (u[10:8] == 3'b000);      // 0 .. 255
     wire [7:0]  ul   = u[7:0];
 
-    wire rows    = ({1'b0, s_y} >= h_p) && (s_y <= s);
     wire lt_half = near & (ul < half);
     wire lamp    = (ul < w) | (ul >= h_w);
 
