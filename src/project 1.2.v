@@ -1,0 +1,521 @@
+`default_nettype none
+
+// ==========================================================================
+// project.v
+// ==========================================================================
+/*
+ * Road racer, stage 1: pseudo-3D road with speed, steering and heading,
+ * distant mountains, a speed bar and engine sound.
+ *
+ * Inputs : ui_in[0] left, ui_in[1] right, ui_in[2] accelerate, ui_in[3] brake
+ * Outputs: uo_out = Tiny VGA PMOD (RGB222 + syncs)
+ *          uio[0] = audio (PWM, needs an RC filter on real hardware)
+ *
+ * Rename the module to tt_um_<your GitHub username>_... before pushing.
+ */
+
+module tt_um_yamin_d_first_person_driving_game (
+    input  wire [7:0] ui_in,
+    output wire [7:0] uo_out,
+    input  wire [7:0] uio_in,
+    output wire [7:0] uio_out,
+    output wire [7:0] uio_oe,
+    input  wire       ena,
+    input  wire       clk,
+    input  wire       rst_n
+);
+    // ---- reset, registered once: the input pin arrives late in the clock and
+    // fans out to about a hundred registers, so the inside uses a flip-flop
+    reg rst_q;
+    always @(posedge clk)
+        rst_q <= rst_n;
+
+    // ---- timing
+    wire [9:0] x, y;
+    wire hsync, vsync, active, frame, line_end;
+    vga_timing vga (
+        .clk(clk), .rst_n(rst_q), .x(x), .y(y),
+        .hsync(hsync), .vsync(vsync), .active(active), .frame(frame),
+        .line_end(line_end)
+    );
+
+    // ---- buttons
+    wire [3:0] btn;
+    ip_input_sync #(.N(4)) sync (.clk(clk), .in(ui_in[3:0]), .out(btn));
+
+    // ---- car state, once per frame
+    wire        [7:0] v;
+    wire signed [2:0] wheel;
+    wire signed [7:0] h;
+    wire signed [7:0] p;
+    wire        [8:0] D;
+    wire              offroad;
+    car_state car (
+        .clk(clk), .rst_n(rst_q), .frame(frame),
+        .left(btn[0]), .right(btn[1]), .accel(btn[2]), .brake(btn[3]),
+        .v(v), .wheel(wheel), .h(h), .p(p), .D(D), .offroad(offroad)
+    );
+
+    // ---- per-line values
+    wire         [3:0] z;
+    wire signed [16:0] A;
+    line_setup #(.Z_BITS(4)) line (
+        .clk(clk), .rst_n(rst_q), .x(x), .y(y), .h(h), .p(p),
+        .z(z), .A(A)
+    );
+
+    // ---- per-pixel colour
+    wire [5:0] rgb;
+    pixel_colour pix (
+        .clk(clk), .x(x), .y(y), .active(active), .z(z), .A(A), .h(h),
+        .d_hi(D[8:5]), .v(v), .rgb(rgb)
+    );
+
+    // ---- sound
+    wire [7:0] sample;
+    wire       audio;
+    engine_audio engine (
+        .clk(clk), .rst_n(rst_q), .tick(line_end), .v(v),
+        .offroad(offroad), .pwm_count(x[7:0]), .sample(sample), .out(audio)
+    );
+
+    // ---- outputs, registered so every pin changes on the same clock edge.
+    // pixel_colour has one pipeline stage, so the syncs are delayed one clock
+    // to stay lined up with the colour.
+    // Tiny VGA PMOD order: {hsync, B0, G0, R0, vsync, B1, G1, R1}
+    reg hsync_q, vsync_q;
+    reg [7:0] vga_out;
+    always @(posedge clk) begin
+        hsync_q <= hsync;
+        vsync_q <= vsync;
+        vga_out <= {hsync_q, rgb[0], rgb[2], rgb[4], vsync_q, rgb[1], rgb[3], rgb[5]};
+    end
+
+    assign uo_out  = vga_out;
+    assign uio_out = {7'b0000000, audio};
+    assign uio_oe  = 8'b0000_0001;
+
+    wire _unused = &{ena, uio_in, ui_in[7:4], wheel, D[4:0], frame, sample, 1'b0};
+endmodule
+
+// ==========================================================================
+// vga_timing.v
+// ==========================================================================
+// 640x480 at 60 Hz from a 25 MHz clock: 800 clocks per line, 525 lines per frame.
+// x and y count every clock, including blanking, so other blocks can schedule
+// work at fixed positions (x = 640 starts horizontal blanking, y = 480 vertical).
+
+module vga_timing (
+    input  wire       clk,
+    input  wire       rst_n,
+    output reg  [9:0] x,        // 0..799
+    output reg  [9:0] y,        // 0..524
+    output wire       hsync,    // active low
+    output wire       vsync,    // active low
+    output wire       active,   // high inside the 640x480 picture
+    output reg        frame,    // one-clock pulse at the start of vertical blanking
+    output reg        line_end  // one-clock pulse at x = 799 on every line
+);
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            x <= 10'd0;
+            y <= 10'd0;
+        end else if (x == 10'd799) begin
+            x <= 10'd0;
+            y <= (y == 10'd524) ? 10'd0 : y + 10'd1;
+        end else begin
+            x <= x + 10'd1;
+        end
+    end
+
+    assign hsync  = ~((x >= 10'd656) && (x < 10'd752));
+    assign vsync  = ~((y >= 10'd490) && (y < 10'd492));
+    assign active = (x < 10'd640) && (y < 10'd480);
+    // registered strobes, decoded one clock early (see line_setup)
+    always @(posedge clk) begin
+        frame    <= (x == 10'd799) && (y == 10'd479);   // high at x = 0, y = 480
+        line_end <= (x == 10'd798);                     // high at x = 799
+    end
+endmodule
+
+// ==========================================================================
+// ip_input_sync.v
+// ==========================================================================
+// Two-flop synchroniser for the buttons. There is no debounce counter:
+// car_state only reads the buttons on the frame pulse, every 16.7 ms, which is
+// longer than a switch bounces, so each read sees either the old or new state.
+
+module ip_input_sync #(
+    parameter N = 4
+) (
+    input  wire         clk,
+    input  wire [N-1:0] in,
+    output wire [N-1:0] out
+);
+    reg [N-1:0] s1, s2;
+    always @(posedge clk) begin
+        s1 <= in;
+        s2 <= s1;
+    end
+    assign out = s2;
+endmodule
+
+// ==========================================================================
+// car_state.v
+// ==========================================================================
+// Car state, updated once per frame on the frame pulse.
+//   v      speed, 0..192
+//   wheel  wheel angle, -2..2, centres itself when no steering button is held
+//   h      heading in pixels (f * psi), stops growing past +/-96
+//   P      sideways position with 6 fraction bits; p = P >>> 6, road edge at |p| = 64,
+//          stops moving outwards past |p| = 96
+//   D      distance travelled, 9 bits, wraps (only its top bits are used)
+// Matches Car.frame() in road_model.py.
+
+module car_state (
+    input  wire              clk,
+    input  wire              rst_n,
+    input  wire              frame,
+    input  wire              left,
+    input  wire              right,
+    input  wire              accel,
+    input  wire              brake,
+    output reg         [7:0] v,
+    output reg  signed [2:0] wheel,
+    output reg  signed [7:0] h,
+    output wire signed [7:0] p,
+    output reg         [8:0] D,
+    output reg               offroad
+);
+    localparam [7:0] V_MAX = 8'd192;
+
+    reg signed [13:0] P;
+    reg        [2:0]  n;          // frame counter for coasting drag
+
+    assign p = P[13:6];           // same as P >>> 6
+    // |p| >= 72 without working out |p|: compare against constants. Registered:
+    // P changes only on step_p, long before the next frame pulse reads it.
+    always @(posedge clk)
+        offroad <= (p >= 8'sd72) || (p <= -8'sd72);
+
+    // ---- speed: one small signed step, one adder, clamp at zero
+    reg signed [3:0] d;
+    always @(*) begin
+        if (offroad && v > 8'd96) d = brake ? -4'sd4 : -4'sd2;   // grass drag
+        else if (accel)           d = (v == V_MAX) ? 4'sd0 : 4'sd1;
+        else if (brake)           d = -4'sd4;
+        else if (n == 3'd0)       d = -4'sd1;
+        else                      d = 4'sd0;
+    end
+    // The step is registered every clock; its inputs (buttons, v, n, offroad)
+    // are all steady before the frame pulse, so the pulse just adds it.
+    reg signed [3:0] d_q;
+    always @(posedge clk)
+        d_q <= d;
+    wire signed [8:0] v_sum = $signed({1'b0, v}) + {{5{d_q[3]}}, d_q};
+    wire        [7:0] v1    = v_sum[8] ? 8'd0 : v_sum[7:0];
+
+    // ---- wheel angle
+    reg signed [2:0] wheel1;
+    always @(*) begin
+        if (left && !right)       wheel1 = (wheel == -3'sd2) ? -3'sd2 : wheel - 3'sd1;
+        else if (right && !left)  wheel1 = (wheel ==  3'sd2) ?  3'sd2 : wheel + 3'sd1;
+        else if (wheel[2])        wheel1 = wheel + 3'sd1;
+        else if (wheel != 3'sd0)  wheel1 = wheel - 3'sd1;
+        else                      wheel1 = 3'sd0;
+    end
+
+    // The update is spread over three clocks so each clock has one adder:
+    //   frame     speed, wheel and frame counter
+    //   step_k    (the speed factor k is registered from the new speed)
+    //   step_h    heading, from the registered speed factor and wheel
+    //   step_p    position and distance, from the registered heading
+    // This gives exactly the same result as doing it all at once, in the same
+    // order as road_model.py, and it is all done within 4 clocks of the pulse.
+    reg step_k, step_h, step_p;
+
+    // ---- speed factor 0, 1 or 2: multiplying by it is a shift
+    reg k1, k2;                   // registered: v changes only on the frame pulse
+    always @(posedge clk) begin
+        k1 <= v[6] & ~v[7];       // 64 <= v < 128
+        k2 <= v[7];               // v >= 128
+    end
+
+    // limits: value >= 96 or value <= -97, from the top three bits only
+    function at_limit(input [2:0] top, input step_neg, input step_zero);
+        at_limit = !step_zero && (step_neg ? (top == 3'b100) : (top == 3'b011));
+    endfunction
+
+    // heading: h + wheel*k, held once it passes +/-96
+    wire signed [7:0] w8  = {{5{wheel[2]}}, wheel};
+    wire signed [7:0] dh  = k2 ? (w8 <<< 1) : (k1 ? w8 : 8'sd0);
+    wire              h_stop = at_limit(h[7:5], wheel[2], (wheel == 3'sd0) || !(k1 || k2));
+    wire signed [7:0] h1  = h_stop ? h : h + dh;
+
+    // position: P + h*k, held once |p| passes 96
+    wire signed [13:0] h14   = {{6{h[7]}}, h};
+    wire signed [13:0] dP    = k2 ? (h14 <<< 1) : (k1 ? h14 : 14'sd0);
+    wire               P_stop = at_limit(P[13:11], h[7], (h == 8'sd0) || !(k1 || k2));
+    wire signed [13:0] P1    = P_stop ? P : P + dP;
+
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            v      <= 8'd0;
+            wheel  <= 3'sd0;
+            h      <= 8'sd0;
+            P      <= 14'sd0;
+            D      <= 9'd0;
+            n      <= 3'd0;
+            step_k <= 1'b0;
+            step_h <= 1'b0;
+            step_p <= 1'b0;
+        end else begin
+            step_k <= frame;
+            step_h <= step_k;
+            step_p <= step_h;
+            if (frame) begin
+                v     <= v1;
+                wheel <= wheel1;
+                n     <= n + 3'd1;
+            end
+            if (step_h)
+                h <= h1;
+            if (step_p) begin
+                P <= P1;
+                D <= D + {1'b0, v};
+            end
+        end
+    end
+endmodule
+
+// ==========================================================================
+// line_setup.v
+// ==========================================================================
+// Per-line values for the road.
+//   z  = 2**14 / s_y, from a restoring divider producing one quotient bit per
+//        clock. It starts at x = 640 (after the visible pixels) and works out z
+//        for the NEXT line in 15 clocks; the quotient register then holds that z
+//        for the whole of the next line.
+//   A  = ((h - 320) << 6) + p * s_y, within 17 bits. Loaded at the end of the
+//        last sky row and then built by adding p at the end of every road row. Folding h - 320 in
+//        means the pixel stage needs one adder: x - centre = x + (A >>> 6).
+
+module line_setup #(
+    parameter Z_BITS = 4          // quotient bits kept (2..15): 4 for stage 1, 15 for curves
+) (
+    input  wire               clk,
+    input  wire               rst_n,
+    input  wire        [9:0]  x,
+    input  wire        [9:0]  y,
+    input  wire signed [7:0]  h,
+    input  wire signed [7:0]  p,
+    output wire [Z_BITS-1:0]  z,
+    output reg  signed [16:0] A
+);
+    localparam [9:0] HORIZON  = 10'd128;
+    localparam [9:0] DASH_TOP = 10'd384;
+
+    // ---- divider: s_y of the next line is y + 1 - 128 = y - 127 (1..255)
+    // divisor for the next line, registered: y is steady for 640 clocks first
+    reg  [7:0] d;
+    always @(posedge clk)
+        d <= y[7:0] - 8'd127;                           // same as (y - 127) mod 256
+
+    // Strobes are decoded one clock early and registered, so each comes
+    // straight from a flip-flop on the same cycle as before. This keeps the
+    // decode logic off the paths into the many registers they control.
+    reg start;                    // high at x = 640 on rows 128..382
+    reg a_load;                   // high at x = 799 on row 127
+    reg a_add;                    // high at x = 799 on rows 128..383
+    always @(posedge clk) begin
+        start  <= (x == 10'd639) && (y >= HORIZON) && (y < DASH_TOP - 10'd1);
+        a_load <= (x == 10'd798) && (y == HORIZON - 10'd1);
+        a_add  <= (x == 10'd798) && (y >= HORIZON) && (y < DASH_TOP);
+    end
+
+    reg [7:0]  r;                 // remainder, always < d after a step
+    reg [Z_BITS-1:0] q;           // the last Z_BITS quotient bits are the low bits
+    reg [3:0]  i;                 // 14..0 while dividing, 15 when idle
+
+    wire       busy = (i != 4'd15);
+    wire [8:0] r_sh = {r, (i == 4'd14)};               // bring down the next bit of 2**14
+    wire [9:0] diff = {1'b0, r_sh} - {2'b00, d};       // one subtractor ...
+    wire       ge   = ~diff[9];                        // ... whose borrow is the compare
+    wire [7:0] r_new = ge ? diff[7:0] : r_sh[7:0];
+
+    always @(posedge clk) begin
+        if (!rst_n)      i <= 4'd15;
+        else if (start)  i <= 4'd14;
+        else if (busy)   i <= i - 4'd1;                 // 0 -> 15 ends the run
+    end
+
+    // r and q need no reset: r is cleared at start and q is fully shifted over
+    always @(posedge clk) begin
+        if (start) begin
+            r <= 8'd0;
+        end else if (busy) begin
+            r <= r_new;
+            q <= {q[Z_BITS-2:0], ge};
+        end
+    end
+
+    assign z = q;
+
+    // ---- centre offset and steering accumulator
+    wire signed [10:0] h_off = {{3{h[7]}}, h} - 11'sd320;
+    // no reset: A is always loaded at the end of row 127, before any road row
+    always @(posedge clk) begin
+        if (a_load)
+            A <= {h_off, 6'b000000};
+        else if (a_add)
+            A <= A + {{9{p[7]}}, p};
+    end
+    wire _unused = &{diff[8], 1'b0};
+endmodule
+
+// ==========================================================================
+// pixel_colour.v
+// ==========================================================================
+// Colour of the pixel at (x, y), in two pipeline stages so that each clock
+// has only part of the work (the slow corner of GF180 needs this):
+//   stage 1  |x - centre|, the mountain test and the speed-bar test, registered
+//   stage 2  compare against the road widths and choose the colour
+// rgb therefore belongs to the pixel one clock earlier than (x, y); the top
+// level delays the syncs by the same clock. Per pixel there are only small
+// adders, comparators and multiplexers. rgb is {R1,R0,G1,G0,B1,B0}.
+// Layout: sky 0-127, horizon 128, road 129-383, dashboard 384-479, chosen so
+// that s_y and the region tests are bit slices of y.
+
+module pixel_colour (
+    input  wire               clk,
+    input  wire        [9:0]  x,
+    input  wire        [9:0]  y,
+    input  wire               active,
+    input  wire        [3:0]  z,       // low bits of this line's depth, from line_setup
+    input  wire signed [16:0] A,       // ((h - 320) << 6) + p * s_y
+    input  wire signed [7:0]  h,       // heading in pixels
+    input  wire        [3:0]  d_hi,    // distance >> 5
+    input  wire        [7:0]  v,       // speed, for the bar
+    output reg         [5:0]  rgb
+);
+    // colours, RR_GG_BB
+    localparam [5:0] SKY0     = 6'b00_00_10;
+    localparam [5:0] SKY1     = 6'b00_01_10;
+    localparam [5:0] SKY2     = 6'b00_01_11;
+    localparam [5:0] SKY3     = 6'b01_10_11;
+    localparam [5:0] MOUNTAIN = 6'b01_01_10;
+    localparam [5:0] DASH_COL = 6'b01_00_01;
+    localparam [5:0] BAR_COL  = 6'b11_10_00;
+    localparam [5:0] LINE_COL = 6'b11_11_11;
+    localparam [5:0] TARMAC0  = 6'b01_01_01;
+    localparam [5:0] TARMAC1  = 6'b10_10_10;
+    localparam [5:0] KERB0    = 6'b11_11_11;
+    localparam [5:0] KERB1    = 6'b11_00_00;
+    localparam [5:0] GRASS0   = 6'b00_10_00;
+    localparam [5:0] GRASS1   = 6'b00_11_00;
+
+    // ---- regions, as bit slices of y (y < 480)
+    wire sky  = (y[9:7] == 3'b000);                 // y < 128
+    wire dash = y[8] & y[7];                        // y >= 384
+    wire [7:0] s_y = {~y[7], y[6:0]};               // y - 128, valid on road rows
+
+    // ---- road geometry for this line (w = s_y)
+    wire [8:0] kerb_w = {1'b0, s_y} + {4'b0000, s_y[7:3]};
+    wire [3:0] dash_w = {1'b0, s_y[7:5]} + 4'd1;
+
+    wire signed [10:0] a6 = A[16:6];                // A >>> 6
+    wire signed [10:0] dx = $signed({1'b0, x}) + a6;    // x - centre
+    wire        [9:0]  d  = dx[10] ? ~dx[9:0] : dx[9:0]; // |dx|, or |dx| - 1 when negative
+
+    wire [3:0] band   = z[3:0] + d_hi;
+    wire       stripe = band[3] & (s_y[7:5] != 3'b000);  // no stripes for s_y < 32
+
+    // ---- mountains: a triangle wave indexed by x + h, so they slide as you turn
+    wire [6:0] u      = x[6:0] + h[6:0];
+    wire [4:0] tri_w  = u[5] ? ~u[4:0] : u[4:0];
+    wire [5:0] mh     = {1'b0, tri_w} + (u[6] ? {2'b00, tri_w[4:1]} : 6'd0);
+    wire       peak   = ({1'b0, ~y[6:0]} < {2'b00, mh});  // 127 - y < height
+
+    // ---- speed bar: rows 432-447, columns 256 .. 256 + v
+    wire in_bar = (y[8:4] == 5'b11011) && (x[9:8] == 2'b01) && (x[7:0] < v);
+
+    // ---- stage 1 registers. Everything else used below depends only on y,
+    // or changes only during blanking, so it is the same for the pixel one
+    // clock earlier (at a line change that pixel is in blanking anyway).
+    reg [9:0] d_q;
+    reg       peak_q, in_bar_q, active_q;
+    always @(posedge clk) begin
+        d_q      <= d;
+        peak_q   <= peak;
+        in_bar_q <= in_bar;
+        active_q <= active;
+    end
+
+    // ---- stage 2
+    always @(*) begin
+        if (!active_q)
+            rgb = 6'b00_00_00;
+        else if (sky)
+            rgb = peak_q ? MOUNTAIN :
+                  (y[6:5] == 2'd0) ? SKY0 :
+                  (y[6:5] == 2'd1) ? SKY1 :
+                  (y[6:5] == 2'd2) ? SKY2 : SKY3;
+        else if (dash)
+            rgb = in_bar_q ? BAR_COL : DASH_COL;
+        else if (s_y == 8'd0)
+            rgb = GRASS0;
+        else if (stripe && d_q < {6'd0, dash_w})
+            rgb = LINE_COL;
+        else if (d_q < {2'b00, s_y})
+            rgb = stripe ? TARMAC1 : TARMAC0;
+        else if (d_q < {1'b0, kerb_w})
+            rgb = stripe ? KERB1 : KERB0;
+        else
+            rgb = stripe ? GRASS1 : GRASS0;
+    end
+    wire _unused = &{A[5:0], h[7], band[2:0], 1'b0};
+endmodule
+
+// ==========================================================================
+// engine_audio.v
+// ==========================================================================
+// Engine sound. A phase accumulator steps once per line (31.25 kHz) with a step
+// that rises with speed: inc = 128 + 2v gives about 61 Hz idling, 244 Hz at top
+// speed. 128 + 2v = (v + 64) << 1, so it needs only a 2-bit increment. The sample is a sawtooth plus a square an octave below. Off the road,
+// LFSR noise is mixed in for a gravel rumble. The output pin is PWM: high
+// while the low 8 bits of the VGA x counter are below the sample, which gives
+// a 98 kHz carrier with no counter of its own.
+
+module engine_audio (
+    input  wire       clk,
+    input  wire       rst_n,
+    input  wire       tick,       // once per line
+    input  wire [7:0] v,
+    input  wire       offroad,
+    input  wire [7:0] pwm_count,  // x[7:0] from the VGA timing
+    output wire [7:0] sample,
+    output reg        out
+);
+    reg [16:0] phase;
+    reg [14:0] lfsr;
+
+    wire [8:0] v64 = {1'b0, v} + 9'd64;
+    wire [9:0] inc = {v64, 1'b0};
+
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            phase <= 17'd0;
+            lfsr  <= 15'h7FFF;
+        end else if (tick) begin
+            phase <= phase + {7'd0, inc};
+            lfsr  <= {lfsr[13:0], lfsr[14] ^ lfsr[13]};
+        end
+    end
+
+    wire [7:0] base = {1'b0, phase[15:9]} + (phase[16] ? 8'd64 : 8'd0);
+    assign sample = offroad ? (base ^ {2'b00, lfsr[5:0]}) : base;
+
+    // registered, so the pin is driven straight from a flip-flop
+    always @(posedge clk)
+        out <= (pwm_count < sample);
+endmodule
