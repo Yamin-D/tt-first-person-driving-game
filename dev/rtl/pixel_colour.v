@@ -48,6 +48,8 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     localparam [5:0] SLOW_LAMP = 6'b11_00_00;
     localparam [5:0] ONC_BODY  = 6'b11_11_11;
     localparam [5:0] ONC_LAMP  = 6'b11_11_00;
+    localparam [5:0] SLOW_GLASS = 6'b00_00_01;
+    localparam [5:0] ONC_GLASS  = 6'b00_01_10;
     localparam [5:0] SLOW_SIDE = 6'b00_00_10;
     localparam [5:0] ONC_SIDE  = 6'b10_10_10;
     localparam [5:0] PANEL_COL = 6'b00_00_00;
@@ -146,13 +148,15 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire [10:0] u_onc  = ~($signed({1'b0, x}) + k_onc);
     reg  [10:0] u_slow_q, u_onc_q;
     // row tests for the next pixel stage, from y one clock sooner
-    reg rows_slow_q, rows_onc_q;
+    reg rows_slow_q, rows_onc_q, win_slow_q, win_onc_q;
     reg [7:0] col_b_q;
     wire [8:0] top_slow = {2'b00, s_slow[7:1]} + {4'b0000, s_slow[7:3]};
     wire [8:0] top_onc  = {2'b00, s_onc[7:1]}  + {4'b0000, s_onc[7:3]};
     always @(posedge clk) begin
         rows_slow_q <= ({1'b0, s_now} >= top_slow) && (s_now <= s_slow);
         rows_onc_q  <= ({1'b0, s_now} >= top_onc)  && (s_now <= s_onc);
+        win_slow_q  <= ({1'b0, s_now} < top_slow + {4'b0000, s_slow[7:3]});
+        win_onc_q   <= ({1'b0, s_now} < top_onc  + {4'b0000, s_onc[7:3]});
         col_b_q     <= {1'b0, s_now[7:1]} + {2'b00, s_now[7:2]};
     end
 
@@ -208,10 +212,10 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire [1:0] slow_kind;       // 0 none, 1 body, 3 lamp
     wire [1:0] onc_kind;
     wire       slow_side, onc_side;
-    car_shape shape_slow (.s(s_slow), .rows(rows_slow_q), .u(u_slow_q),
+    car_shape shape_slow (.s(s_slow), .rows(rows_slow_q), .window(win_slow_q), .u(u_slow_q),
                           .road_side(~left_q), .d(d_q), .col_a(col_a), .col_b(col_b_q),
                           .kind(slow_kind), .side(slow_side));
-    car_shape shape_onc  (.s(s_onc), .rows(rows_onc_q), .u(u_onc_q),
+    car_shape shape_onc  (.s(s_onc), .rows(rows_onc_q), .window(win_onc_q), .u(u_onc_q),
                           .road_side(left_q), .d(d_q), .col_a(col_a), .col_b(col_b_q),
                           .kind(onc_kind), .side(onc_side));
     always @(*) begin
@@ -240,11 +244,11 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         else if ((s_y == 8'd0) || (near_horizon && curved))
             rgb = GRASS0;
         else if (onc_kind != 2'd0)
-            rgb = onc_kind[1] ? ONC_LAMP : ONC_BODY;
+            rgb = (onc_kind == 2'd1) ? ONC_BODY : (onc_kind == 2'd2) ? ONC_GLASS : ONC_LAMP;
         else if (onc_side)
             rgb = ONC_SIDE;
         else if (slow_kind != 2'd0)
-            rgb = slow_kind[1] ? SLOW_LAMP : SLOW_BODY;
+            rgb = (slow_kind == 2'd1) ? SLOW_BODY : (slow_kind == 2'd2) ? SLOW_GLASS : SLOW_LAMP;
         else if (slow_side)
             rgb = SLOW_SIDE;
         else if (stripe && d_q < {6'd0, dash_w})

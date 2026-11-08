@@ -85,10 +85,15 @@ module car_state (
     wire crashing = (crash != 6'd0);
 
     // ---- traffic: one adder, slow car on step_s, oncoming car on step_o
-    reg                sel_o;                            // a copy of step_o for the data path
-    always @(posedge clk)
-        sel_o <= step_s;
-    wire        [11:0] z_now = sel_o ? onc : slow;
+    // two copies of step_o for the data path; one stored inverted so that
+    // synthesis keeps both
+    reg                sel_o, sel_on;
+    always @(posedge clk) begin
+        sel_o  <= step_s;
+        sel_on <= ~step_s;
+    end
+    wire        [11:0] z_now = {~sel_on ? onc[11:6] : slow[11:6],
+                                 sel_o  ? onc[5:0]  : slow[5:0]};
     // registered one clock ahead: v arrives from a heavily loaded net
     reg  signed  [5:0] delta;
     always @(posedge clk)

@@ -263,10 +263,15 @@ module car_state (
     wire crashing = (crash != 6'd0);
 
     // ---- traffic: one adder, slow car on step_s, oncoming car on step_o
-    reg                sel_o;                            // a copy of step_o for the data path
-    always @(posedge clk)
-        sel_o <= step_s;
-    wire        [11:0] z_now = sel_o ? onc : slow;
+    // two copies of step_o for the data path; one stored inverted so that
+    // synthesis keeps both
+    reg                sel_o, sel_on;
+    always @(posedge clk) begin
+        sel_o  <= step_s;
+        sel_on <= ~step_s;
+    end
+    wire        [11:0] z_now = {~sel_on ? onc[11:6] : slow[11:6],
+                                 sel_o  ? onc[5:0]  : slow[5:0]};
     // registered one clock ahead: v arrives from a heavily loaded net
     reg  signed  [5:0] delta;
     always @(posedge clk)
@@ -613,6 +618,8 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     localparam [5:0] SLOW_LAMP = 6'b11_00_00;
     localparam [5:0] ONC_BODY  = 6'b11_11_11;
     localparam [5:0] ONC_LAMP  = 6'b11_11_00;
+    localparam [5:0] SLOW_GLASS = 6'b00_00_01;
+    localparam [5:0] ONC_GLASS  = 6'b00_01_10;
     localparam [5:0] SLOW_SIDE = 6'b00_00_10;
     localparam [5:0] ONC_SIDE  = 6'b10_10_10;
     localparam [5:0] PANEL_COL = 6'b00_00_00;
@@ -711,13 +718,15 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire [10:0] u_onc  = ~($signed({1'b0, x}) + k_onc);
     reg  [10:0] u_slow_q, u_onc_q;
     // row tests for the next pixel stage, from y one clock sooner
-    reg rows_slow_q, rows_onc_q;
+    reg rows_slow_q, rows_onc_q, win_slow_q, win_onc_q;
     reg [7:0] col_b_q;
     wire [8:0] top_slow = {2'b00, s_slow[7:1]} + {4'b0000, s_slow[7:3]};
     wire [8:0] top_onc  = {2'b00, s_onc[7:1]}  + {4'b0000, s_onc[7:3]};
     always @(posedge clk) begin
         rows_slow_q <= ({1'b0, s_now} >= top_slow) && (s_now <= s_slow);
         rows_onc_q  <= ({1'b0, s_now} >= top_onc)  && (s_now <= s_onc);
+        win_slow_q  <= ({1'b0, s_now} < top_slow + {4'b0000, s_slow[7:3]});
+        win_onc_q   <= ({1'b0, s_now} < top_onc  + {4'b0000, s_onc[7:3]});
         col_b_q     <= {1'b0, s_now[7:1]} + {2'b00, s_now[7:2]};
     end
 
@@ -773,10 +782,10 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire [1:0] slow_kind;       // 0 none, 1 body, 3 lamp
     wire [1:0] onc_kind;
     wire       slow_side, onc_side;
-    car_shape shape_slow (.s(s_slow), .rows(rows_slow_q), .u(u_slow_q),
+    car_shape shape_slow (.s(s_slow), .rows(rows_slow_q), .window(win_slow_q), .u(u_slow_q),
                           .road_side(~left_q), .d(d_q), .col_a(col_a), .col_b(col_b_q),
                           .kind(slow_kind), .side(slow_side));
-    car_shape shape_onc  (.s(s_onc), .rows(rows_onc_q), .u(u_onc_q),
+    car_shape shape_onc  (.s(s_onc), .rows(rows_onc_q), .window(win_onc_q), .u(u_onc_q),
                           .road_side(left_q), .d(d_q), .col_a(col_a), .col_b(col_b_q),
                           .kind(onc_kind), .side(onc_side));
     always @(*) begin
@@ -805,11 +814,11 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         else if ((s_y == 8'd0) || (near_horizon && curved))
             rgb = GRASS0;
         else if (onc_kind != 2'd0)
-            rgb = onc_kind[1] ? ONC_LAMP : ONC_BODY;
+            rgb = (onc_kind == 2'd1) ? ONC_BODY : (onc_kind == 2'd2) ? ONC_GLASS : ONC_LAMP;
         else if (onc_side)
             rgb = ONC_SIDE;
         else if (slow_kind != 2'd0)
-            rgb = slow_kind[1] ? SLOW_LAMP : SLOW_BODY;
+            rgb = (slow_kind == 2'd1) ? SLOW_BODY : (slow_kind == 2'd2) ? SLOW_GLASS : SLOW_LAMP;
         else if (slow_side)
             rgb = SLOW_SIDE;
         else if (stripe && d_q < {6'd0, dash_w})
@@ -1035,12 +1044,13 @@ endmodule
 module car_shape (
     input  wire [7:0] s,
     input  wire       rows,      // this row is inside the car, registered
+    input  wire       window,    // this row is in the window band, registered
     input  wire [10:0] u,        // columns from the rear face's near edge, registered
     input  wire       road_side, // on this car's side of the road centre
     input  wire [9:0] d,         // |x - road centre| for this row
     input  wire [7:0] col_a,     // s_y / 4
     input  wire [7:0] col_b,     // 3 s_y / 4, registered
-    output wire [1:0] kind,      // 0 none, 1 body, 3 lamp
+    output wire [1:0] kind,      // 0 none, 1 body, 2 glass, 3 lamp
     output wire       side
 );
     wire [7:0] half  = {1'b0, s[7:1]};
@@ -1056,7 +1066,8 @@ module car_shape (
     wire lt_half = near & (ul < half);
     wire lamp    = (ul < w) | (ul >= h_w);
 
-    assign kind = {rows & lt_half & lamp, rows & lt_half};
+    assign kind = !(rows & lt_half) ? 2'd0 :
+                  window ? (lamp ? 2'd1 : 2'd2) : (lamp ? 2'd3 : 2'd1);
 
     wire inner = neg & (u[9:8] == 2'b11) & (~ul < w) & (d >= {2'b00, col_a});
     wire outer = near & ~lt_half & ({1'b0, ul} < h_p) & (d < {2'b00, col_b});

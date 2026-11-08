@@ -53,6 +53,7 @@ VENT_COL = c(2,2,2)
 SLOW_BODY, SLOW_LAMP = c(0,1,3), c(3,0,0)
 ONC_BODY,  ONC_LAMP  = c(3,3,3), c(3,3,0)
 SLOW_SIDE, ONC_SIDE = c(0,0,2), c(2,2,2)
+SLOW_GLASS, ONC_GLASS = c(0,0,1), c(0,1,2)
 PANEL_COL = c(0,0,0)
 BAR_COL  = c(3,2,0)
 LINE_COL = c(3,3,3)
@@ -267,9 +268,9 @@ def draw_cars(row, d, left, s_y, car, now):
     for that row, so it vanishes when the car is straight ahead."""
     x = np.arange(W_SCREEN)
     a_row, b_row = s_y >> 2, (s_y >> 1) + (s_y >> 2)
-    for (Ae, s), base, is_left, body, lamp, flank in (
-            (car.cap_slow, now[0], False, SLOW_BODY, SLOW_LAMP, SLOW_SIDE),
-            (car.cap_onc, now[1], True, ONC_BODY, ONC_LAMP, ONC_SIDE)):
+    for (Ae, s), base, is_left, body, lamp, flank, glass in (
+            (car.cap_slow, now[0], False, SLOW_BODY, SLOW_LAMP, SLOW_SIDE, SLOW_GLASS),
+            (car.cap_onc, now[1], True, ONC_BODY, ONC_LAMP, ONC_SIDE, ONC_GLASS)):
         # below this frame's base row the stored value has already been replaced
         if base is not None and s_y > base[1]:
             continue
@@ -284,8 +285,12 @@ def draw_cars(row, d, left, s_y, car, now):
         outer = lane & road_side & (da >= b) & (da < b + w) & (d < b_row)
         row[inner | outer] = flank
         face = lane & (da >= a) & (da < b)
+        outside = (da < a + w) | (da >= b - w)
         row[face] = body
-        row[face & ((da < a + w) | (da >= b - w))] = lamp
+        if s_y < (s >> 1) + (s >> 3) + (s >> 3):        # the top band is the window
+            row[face & ~outside] = glass
+        else:
+            row[face & outside] = lamp
 
 def score_code(tens, ones, v):
     """0 none, 1 panel, 2 lit segment, rows 384-447: the score at columns 512-575
