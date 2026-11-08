@@ -8,8 +8,7 @@
 module car_shape (
     input  wire [7:0] s,
     input  wire       rows,      // this row is inside the car, registered
-    input  wire [10:0] u,        // |x - this car's reference| - s/4, registered
-    input  wire       in_lane,   // on this car's side of its reference
+    input  wire [10:0] u,        // columns from the rear face's near edge, registered
     input  wire       road_side, // on this car's side of the road centre
     input  wire [9:0] d,         // |x - road centre| for this row
     input  wire [7:0] col_a,     // s_y / 4
@@ -30,9 +29,9 @@ module car_shape (
     wire lt_half = near & (ul < half);
     wire lamp    = (ul < w) | (ul >= h_w);
 
-    assign kind = {rows & in_lane & lt_half & lamp, rows & in_lane & lt_half};
+    assign kind = {rows & lt_half & lamp, rows & lt_half};
 
     wire inner = neg & (u[9:8] == 2'b11) & (~ul < w) & (d >= {2'b00, col_a});
     wire outer = near & ~lt_half & ({1'b0, ul} < h_p) & (d < {2'b00, col_b});
-    assign side = rows & in_lane & road_side & (inner | outer);
+    assign side = rows & road_side & (inner | outer);
 endmodule

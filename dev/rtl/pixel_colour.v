@@ -65,10 +65,12 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     // Stage 2 works on the pixel one clock earlier, so it can use a local copy
     // of y. That takes most of the load off the y counter.
     // The wheel and the digits never touch column 0, so they can use a copy too.
-    reg [9:0] y_q, y_w;
+    // y_w is stored inverted, or synthesis would merge the two copies into one.
+    reg [9:0] y_q, y_wn;
+    wire [9:0] y_w = ~y_wn;
     always @(posedge clk) begin
-        y_q <= y;
-        y_w <= y;
+        y_q  <= y;
+        y_wn <= ~y;
     end
     wire sky  = (y_q[9:7] == 3'b000);                 // y < 128
     wire dash = y_q[8] & (y_q[7] | (y_q[6] & y_q[5]));// y >= 352
@@ -131,13 +133,16 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         end
     end
 
-    // this car's x - lane reference, and |that|; registered with stage 1
-    wire signed [10:0] dc_slow = $signed({1'b0, x}) + ae_slow;
-    wire signed [10:0] dc_onc  = $signed({1'b0, x}) + ae_onc;
-    wire [9:0] da_slow = dc_slow[9:0] ^ {10{dc_slow[10]}};
-    wire [9:0] da_onc  = dc_onc[9:0]  ^ {10{dc_onc[10]}};
-    wire [10:0] u_slow = {1'b0, da_slow} - {3'b000, s_slow[7:2]};
-    wire [10:0] u_onc  = {1'b0, da_onc}  - {3'b000, s_onc[7:2]};
+    // Each car's column offset from the near edge of its rear face, with one
+    // adder: the slow car (right of its reference) is x + Ae - s/4, and the
+    // oncoming car is ~(x + Ae + s/4). Both constants change only at the base row.
+    reg signed [10:0] k_slow, k_onc;
+    always @(posedge clk) begin
+        k_slow <= ae_slow - $signed({5'b00000, s_slow[7:2]});
+        k_onc  <= ae_onc  + $signed({5'b00000, s_onc[7:2]});
+    end
+    wire [10:0] u_slow =   $signed({1'b0, x}) + k_slow;
+    wire [10:0] u_onc  = ~($signed({1'b0, x}) + k_onc);
     reg  [10:0] u_slow_q, u_onc_q;
     // row tests for the next pixel stage, from y one clock sooner
     reg rows_slow_q, rows_onc_q;
@@ -149,7 +154,6 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         rows_onc_q  <= ({1'b0, s_now} >= top_onc)  && (s_now <= s_onc);
         col_b_q     <= {1'b0, s_now[7:1]} + {2'b00, s_now[7:2]};
     end
-    reg        neg_slow_q, neg_onc_q;
 
     wire [7:0] col_a  = {2'b00, s_y[7:2]};
 
@@ -186,8 +190,6 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         left_q   <= dx[10];
         u_slow_q   <= u_slow;
         u_onc_q    <= u_onc;
-        neg_slow_q <= dc_slow[10];
-        neg_onc_q  <= dc_onc[10];
         score_q  <= score_code;
         inner_q  <= inner_code;
         wheel_q  <= WHEEL_FULL ? wheel_code : {1'b0, wheel_code[0]};
@@ -204,10 +206,10 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire [1:0] slow_kind;       // 0 none, 1 body, 3 lamp
     wire [1:0] onc_kind;
     wire       slow_side, onc_side;
-    car_shape shape_slow (.s(s_slow), .rows(rows_slow_q), .u(u_slow_q), .in_lane(~neg_slow_q),
+    car_shape shape_slow (.s(s_slow), .rows(rows_slow_q), .u(u_slow_q),
                           .road_side(~left_q), .d(d_q), .col_a(col_a), .col_b(col_b_q),
                           .kind(slow_kind), .side(slow_side));
-    car_shape shape_onc  (.s(s_onc), .rows(rows_onc_q), .u(u_onc_q), .in_lane(neg_onc_q),
+    car_shape shape_onc  (.s(s_onc), .rows(rows_onc_q), .u(u_onc_q),
                           .road_side(left_q), .d(d_q), .col_a(col_a), .col_b(col_b_q),
                           .kind(onc_kind), .side(onc_side));
     always @(*) begin

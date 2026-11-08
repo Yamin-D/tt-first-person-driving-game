@@ -152,12 +152,13 @@ module car_state (
     wire               P_stop = at_limit(P[13:11], h[7], (h == 8'sd0) || !(k1 || k2));
     wire signed [13:0] P1    = P_stop ? P : P + dP;
 
-    // Reset reaches about 150 registers here, so each half has a local copy.
+    // Reset reaches about 150 registers here, so it is split into three. They
+    // form a chain, because synthesis would merge identical copies into one.
     reg rst_car, rst_traffic, rst_pos;
     always @(posedge clk) begin
         rst_car     <= rst_n;
-        rst_pos     <= rst_n;
-        rst_traffic <= rst_n;
+        rst_pos     <= rst_car;
+        rst_traffic <= rst_pos;
     end
 
     always @(posedge clk) begin

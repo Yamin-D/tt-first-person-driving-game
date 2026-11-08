@@ -27,7 +27,7 @@ module tb_car_state;
 
     initial begin
         fd = $fopen("script.txt", "r");
-        repeat (2) @(posedge clk);
+        repeat (6) @(posedge clk);
         rst_n = 1;
         while (!$feof(fd)) begin
             code = $fscanf(fd, "%b\n", keys);
