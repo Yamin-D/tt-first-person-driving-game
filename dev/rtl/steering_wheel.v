@@ -14,6 +14,7 @@
 `default_nettype none
 
 module steering_wheel #(parameter FULL = 0) (
+    input  wire       clk,
     input  wire [9:0] x,
     input  wire [9:0] y,
     input  wire signed [2:0] w,
@@ -24,6 +25,9 @@ module steering_wheel #(parameter FULL = 0) (
     wire negative =  w[2];
 
     generate if (FULL) begin : g_full
+        // Two clocks: the adders here, the compares after the registers. Its
+        // result is one clock later than the other per-pixel logic, which moves
+        // the wheel one pixel to the right.
         wire on = (x >= 10'd192) & (x < 10'd448) & y[8] & (y[7] | y[6]);
         wire [7:0] dx = {~(x[7] ^ x[6]), ~x[6], x[5:0]};    // -128..127
         wire [7:0] dy = {y[7] ^ y[6],    ~y[6], y[5:0]};    // -128..31
@@ -31,15 +35,9 @@ module steering_wheel #(parameter FULL = 0) (
         wire [6:0] b  = dy[6:0] ^ {7{dy[7]}};
         wire [7:0] s  = a + b;
 
-        // a, b < 128 from their widths
-        wire in_out = (s < 8'd181);
-        wire in_in  = (a < 7'd112) & (b < 7'd112) & (s < 8'd158);
-        wire rim    = in_out & ~in_in;
-        wire hub    = (a < 7'd20) & (b < 7'd20) & (s < 8'd28);
-
         // marker on the top of the rim, 16 px wide, centred on dx = 16 w
-        wire [4:0] m    = dx[7:3] - {w[2], w, 1'b0};
-        wire      marker = rim & dy[7] & ((m == 5'd0) | (m == 5'b11111));
+        wire [4:0] m       = dx[7:3] - {w[2], w, 1'b0};
+        wire       mark_at = dy[7] & ((m == 5'd0) | (m == 5'b11111));
 
         // shifts: |w| = 1 is >> 2, |w| = 2 is >> 1
         wire [7:0] tx = !tilted ? 8'd0 : w[0] ? {{2{dx[7]}}, dx[7:2]} : {dx[7], dx[7:1]};
@@ -49,11 +47,28 @@ module steering_wheel #(parameter FULL = 0) (
         wire sp_h = (sh[7:3] == 5'd0) | (sh[7:3] == 5'b11111);
         wire sp_v = ((sv[7:3] == 5'd0) | (sv[7:3] == 5'b11111)) & ~dy[7];
 
-        assign code = !on            ? 2'd0 :
-                      marker         ? 2'd2 :
-                      rim            ? 2'd1 :
-                      hub            ? 2'd2 :
-                      in_in & (sp_h | sp_v) ? 2'd3 : 2'd0;
+        reg [6:0] a_q;
+        reg [7:0] s_q;
+        reg       on_q, mark_q, spoke_q;
+        always @(posedge clk) begin
+            a_q     <= a;
+            s_q     <= s;
+            on_q    <= on;
+            mark_q  <= mark_at;
+            spoke_q <= sp_h | sp_v;
+        end
+
+        // a, b < 128 from their widths
+        wire in_out = (s_q < 8'd181);
+        wire in_in  = (a_q < 7'd112) & (b < 7'd112) & (s_q < 8'd158);
+        wire rim    = in_out & ~in_in;
+        wire hub    = (a_q < 7'd20) & (b < 7'd20) & (s_q < 8'd28);
+
+        assign code = !on_q        ? 2'd0 :
+                      rim & mark_q ? 2'd2 :
+                      rim          ? 2'd1 :
+                      hub          ? 2'd2 :
+                      in_in & spoke_q ? 2'd3 : 2'd0;
     end else begin : g_small
         wire on = (x[9:7] == 3'b010) & y[8] & y[7];
         wire [6:0] dx = {~x[6], x[5:0]};                    // -64..63

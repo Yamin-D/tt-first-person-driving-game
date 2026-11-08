@@ -209,7 +209,8 @@ def wheel_code(wheel, full):
     negative shears are one's complement (no carry), which keeps the across
     spoke exactly mirror-symmetric between w and -w."""
     y_, x_ = np.mgrid[0:H_SCREEN, 0:W_SCREEN]
-    dx, dy = x_ - 320, y_ - 448
+    x1 = x_ - 1 if full else x_             # the full wheel takes one more clock
+    dx, dy = x1 - 320, y_ - 448
     a = np.where(dx < 0, ~dx, dx)
     b = np.where(dy < 0, ~dy, dy)
     s = a + b
@@ -218,7 +219,7 @@ def wheel_code(wheel, full):
     sh = dy + ~tx if wheel > 0 else dy + tx
     code = np.zeros_like(x_)
     if full:
-        on = (x_ >= 192) & (x_ < 448) & (y_ >= 320)
+        on = (x1 >= 192) & (x1 < 448) & (y_ >= 320)
         in_out = s < 181                    # a, b < 128 from their widths
         in_in  = (a < 112) & (b < 112) & (s < 158)
         rim = in_out & ~in_in

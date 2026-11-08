@@ -173,7 +173,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         angle <= wheel;
     wire [1:0] wheel_code;
     steering_wheel #(.FULL(WHEEL_FULL)) steer (
-        .x(x), .y(y_w), .w(angle), .code(wheel_code)
+        .clk(clk), .x(x), .y(y_w), .w(angle), .code(wheel_code)
     );
 
     // ---- stage 1 registers. Everything else used below depends only on y,
