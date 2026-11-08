@@ -1,0 +1,4 @@
+# Python packages for the model and checks (plus: iverilog, verilator, yosys, git;
+# OpenSTA for `make sta`). The CI test's own requirements are in test/requirements.txt.
+numpy
+pillow

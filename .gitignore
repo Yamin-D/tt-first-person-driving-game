@@ -11,3 +11,14 @@ test/sim_build
 test/__pycache__/
 test/results.xml
 test/gate_level_netlist.v
+
+# development build products (dev/)
+dev/pdk/
+dev/**/build/
+dev/synth/*.log
+dev/synth/netlist.v
+dev/synth/sta.rpt
+dev/model/frames.png
+dev/model/drive.gif
+dev/model/engine.wav
+__pycache__/
