@@ -75,9 +75,14 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     interior cockpit (.x(x), .y(y), .code(inner_code));
 
     // ---- steering wheel, drawn over everything else
+    // The angle comes from far across the chip and only changes in vertical
+    // blanking, so a local copy takes that distance off the per-pixel path.
+    reg signed [2:0] angle;
+    always @(posedge clk)
+        angle <= wheel;
     wire [1:0] wheel_code;
     steering_wheel #(.FULL(WHEEL_FULL)) steer (
-        .x(x), .y(y), .w(wheel), .code(wheel_code)
+        .x(x), .y(y), .w(angle), .code(wheel_code)
     );
 
     // ---- stage 1 registers. Everything else used below depends only on y,
