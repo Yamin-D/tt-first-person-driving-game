@@ -9,7 +9,7 @@
 // that s_y and the region tests are bit slices of y.
 `default_nettype none
 
-module pixel_colour (
+module pixel_colour #(parameter WHEEL_FULL = 0) (
     input  wire               clk,
     input  wire        [9:0]  x,
     input  wire        [9:0]  y,
@@ -19,6 +19,7 @@ module pixel_colour (
     input  wire signed [7:0]  h,       // heading in pixels
     input  wire        [3:0]  d_hi,    // distance >> 5
     input  wire        [7:0]  v,       // speed, for the bar
+    input  wire signed [2:0]  wheel,   // wheel angle, -2..2
     output reg         [5:0]  rgb
 );
     // colours, RR_GG_BB
@@ -36,6 +37,8 @@ module pixel_colour (
     localparam [5:0] KERB1    = 6'b11_00_00;
     localparam [5:0] GRASS0   = 6'b00_10_00;
     localparam [5:0] GRASS1   = 6'b00_11_00;
+    localparam [5:0] WHEEL0   = 6'b00_00_00;
+    localparam [5:0] WHEEL1   = 6'b10_10_10;
 
     // ---- regions, as bit slices of y (y < 480)
     wire sky  = (y[9:7] == 3'b000);                 // y < 128
@@ -59,16 +62,26 @@ module pixel_colour (
     wire [5:0] mh     = {1'b0, tri_w} + (u[6] ? {2'b00, tri_w[4:1]} : 6'd0);
     wire       peak   = ({1'b0, ~y[6:0]} < {2'b00, mh});  // 127 - y < height
 
-    // ---- speed bar: rows 432-447, columns 256 .. 256 + v
-    wire in_bar = (y[8:4] == 5'b11011) && (x[9:8] == 2'b01) && (x[7:0] < v);
+    // ---- speed bar: vertical, columns 64-95, v/2 rows up from the bottom row.
+    // Only used on dashboard rows, where 479 - y = 95 - y[6:0] is this slice.
+    wire [6:0] up     = {~y[6] & ~y[5], ~y[6] & y[5], ~y[4:0]};
+    wire       in_bar = (x[9:5] == 5'b00010) && (up < v[7:1]);
+
+    // ---- steering wheel, drawn over everything else
+    wire [1:0] wheel_code;
+    steering_wheel #(.FULL(WHEEL_FULL)) steer (
+        .x(x), .y(y), .w(wheel), .code(wheel_code)
+    );
 
     // ---- stage 1 registers. Everything else used below depends only on y,
     // or changes only during blanking, so it is the same for the pixel one
     // clock earlier (at a line change that pixel is in blanking anyway).
     reg [9:0] d_q;
+    reg [1:0] wheel_q;
     reg       peak_q, in_bar_q, active_q;
     always @(posedge clk) begin
         d_q      <= d;
+        wheel_q  <= WHEEL_FULL ? wheel_code : {1'b0, wheel_code[0]};
         peak_q   <= peak;
         in_bar_q <= in_bar;
         active_q <= active;
@@ -78,6 +91,8 @@ module pixel_colour (
     always @(*) begin
         if (!active_q)
             rgb = 6'b00_00_00;
+        else if (wheel_q != 2'd0)
+            rgb = (wheel_q == 2'd1) ? WHEEL0 : (wheel_q == 2'd2) ? BAR_COL : WHEEL1;
         else if (sky)
             rgb = peak_q ? MOUNTAIN :
                   (y[6:5] == 2'd0) ? SKY0 :

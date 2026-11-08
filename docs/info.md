@@ -20,6 +20,11 @@ the wheel and the car drifts across the road according to its heading, both in
 proportion to speed. Turning slides the whole view, including the mountains on
 the horizon. On the grass the car is slowed down.
 
+**Steering wheel.** A steering wheel is drawn in the foreground and turns as you
+steer. Its angle has only five values, so no trigonometry is needed: the rim is
+the gap between two octagons, tested from |dx|, |dy| and |dx| + |dy|, and the
+spoke is sheared with a slope of wheel/4, which is a shift.
+
 **Sound.** The engine note is a sawtooth plus a square an octave below, with a
 pitch that rises with speed (about 61 Hz idling to 244 Hz flat out). Off the road,
 noise from an LFSR is mixed in for a gravel rumble. The audio pin is PWM.
@@ -34,7 +39,7 @@ frame against it from the VGA pins.
 2. Set the clock to 25 MHz (25.175 MHz is the ideal VGA value; both work).
 3. Hold rst_n low for a few clocks, then release it.
 4. Inputs (active high): ui[0] steer left, ui[1] steer right, ui[2] accelerate,
-   ui[3] brake. The speed bar on the dashboard shows the current speed.
+   ui[3] brake. The vertical bar on the dashboard shows the current speed.
 
 ## External hardware
 

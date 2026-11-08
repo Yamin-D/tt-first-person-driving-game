@@ -15,7 +15,7 @@ os.makedirs(BUILD, exist_ok=True)
 
 srcs = [os.path.join(ROOT, "rtl", f) for f in
         ["project.v", "vga_timing.v", "ip_input_sync.v", "car_state.v",
-         "line_setup.v", "pixel_colour.v", "engine_audio.v"]]
+         "line_setup.v", "pixel_colour.v", "steering_wheel.v", "engine_audio.v"]]
 if os.environ.get("ROAD_SRC") == "project":       # test the generated src/project.v
     import re
     text = open(os.path.join(ROOT, "..", "src", "project.v")).read()
@@ -24,9 +24,14 @@ if os.environ.get("ROAD_SRC") == "project":       # test the generated src/proje
     open(renamed, "w").write(text.replace("module " + top, "module tt_um_road_racer"))
     srcs = [renamed]
     OBJ = OBJ + "_project"
+full = os.environ.get("ROAD_FULL") == "1"         # test the 1x2 wheel
+m.WHEEL_FULL = full
+if full:
+    OBJ = OBJ + "_full"
 print("sources:", ", ".join(os.path.relpath(s, ROOT) for s in srcs))
+print("wheel version:", "full (1x2)" if full else "small (1x1)")
 subprocess.run(["verilator", "--cc", "--exe", "--build", "-O3", "-Wno-fatal",
-                "-Wno-lint", "--top-module", "tt_um_road_racer", "-Mdir", OBJ,
+                "-Wno-lint", "-GWHEEL_FULL=%d" % full, "--top-module", "tt_um_road_racer", "-Mdir", OBJ,
                 "-o", "tb_chip", os.path.join(HERE, "tb_chip.cpp")] + srcs,
                check=True, stdout=subprocess.DEVNULL)
 
@@ -38,12 +43,26 @@ def pick_extremes(script, k=8):
         scored.append((abs(car.h) * 64 + abs(car.p) * 199, i + 1))
     return sorted(i for _, i in sorted(scored)[-k:])
 
+def coverage_frames(script):
+    """First frame at each wheel angle and at top speed: the extreme values of
+    the wheel and the speed bar."""
+    car = m.Car(); first = {}
+    for i, keys in enumerate(script):
+        car.frame(**keys)
+        first.setdefault(("wheel", car.wheel), i + 1)
+        if car.v == m.V_MAX:
+            first.setdefault("top speed", i + 1)
+    return first
+
 runs = [("drive", m.drive_script(), [0, 1, 64, 131, 140, 150, 166, 175, 200, 215, 240, 290, 305]),
         ("random", m.random_script(1200), None)]
-failures = 0; outs = []
+failures = 0; outs = []; covered = set()
 for name, script, check in runs:
     if check is None:
         check = pick_extremes(script)
+    first = coverage_frames(script)
+    covered |= set(first)
+    check = sorted(set(check) | set(first.values()))
     with open(os.path.join(BUILD, "script.txt"), "w") as f:
         f.write("\n".join(m.keys_to_bits(k) for k in script) + "\n")
     out = subprocess.run([os.path.join(OBJ, "tb_chip"), os.path.join(BUILD, "script.txt"),
@@ -67,6 +86,9 @@ for name, script, check in runs:
             Image.fromarray(m.to_rgb(hw)).save(os.path.join(BUILD, "chip_frame_150.png"))
     out = "".join(outs)
 
-ok = failures == 0 and all("sync errors: 0" in o and "uio_oe errors: 0" in o for o in outs)
+missing = {("wheel", w) for w in range(-2, 3)} | {"top speed"}
+missing -= covered
+print("coverage missing:", sorted(map(str, missing)) or "none")
+ok = not missing and failures == 0 and all("sync errors: 0" in o and "uio_oe errors: 0" in o for o in outs)
 print("ALL PASS" if ok else "FAIL")
 sys.exit(0 if ok else 1)

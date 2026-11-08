@@ -26,6 +26,7 @@ rtl/ip_input_sync.v  two-flop button synchroniser
 rtl/car_state.v      speed, wheel, heading, position, distance; once per frame
 rtl/line_setup.v     divider for z = 2^14 / s_y, steering accumulator A; once per line
 rtl/pixel_colour.v   colour of each pixel; adders and comparators only
+rtl/steering_wheel.v the wheel in the foreground; FULL selects the 1x1 or 1x2 version
 rtl/engine_audio.v   engine pitch from speed, gravel noise off-road, PWM out
 model/road_model.py  bit-exact Python model (the specification)
 test/                unit tests and whole-chip test against the model

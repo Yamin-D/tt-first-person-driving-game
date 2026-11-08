@@ -15,7 +15,9 @@
  * Rename the module to tt_um_<your GitHub username>_... before pushing.
  */
 
-module tt_um_yamin_d_first_person_driving_game (
+module tt_um_yamin_d_first_person_driving_game #(
+    parameter WHEEL_FULL = 0        // 0: small wheel for 1x1, 1: full wheel for 1x2
+) (
     input  wire [7:0] ui_in,
     output wire [7:0] uo_out,
     input  wire [7:0] uio_in,
@@ -67,9 +69,9 @@ module tt_um_yamin_d_first_person_driving_game (
 
     // ---- per-pixel colour
     wire [5:0] rgb;
-    pixel_colour pix (
+    pixel_colour #(.WHEEL_FULL(WHEEL_FULL)) pix (
         .clk(clk), .x(x), .y(y), .active(active), .z(z), .A(A), .h(h),
-        .d_hi(D[8:5]), .v(v), .rgb(rgb)
+        .d_hi(D[8:5]), .v(v), .wheel(wheel), .rgb(rgb)
     );
 
     // ---- sound
@@ -96,7 +98,7 @@ module tt_um_yamin_d_first_person_driving_game (
     assign uio_out = {7'b0000000, audio};
     assign uio_oe  = 8'b0000_0001;
 
-    wire _unused = &{ena, uio_in, ui_in[7:4], wheel, D[4:0], frame, sample, 1'b0};
+    wire _unused = &{ena, uio_in, ui_in[7:4], D[4:0], frame, sample, 1'b0};
 endmodule
 
 // ==========================================================================
@@ -387,7 +389,7 @@ endmodule
 // Layout: sky 0-127, horizon 128, road 129-383, dashboard 384-479, chosen so
 // that s_y and the region tests are bit slices of y.
 
-module pixel_colour (
+module pixel_colour #(parameter WHEEL_FULL = 0) (
     input  wire               clk,
     input  wire        [9:0]  x,
     input  wire        [9:0]  y,
@@ -397,6 +399,7 @@ module pixel_colour (
     input  wire signed [7:0]  h,       // heading in pixels
     input  wire        [3:0]  d_hi,    // distance >> 5
     input  wire        [7:0]  v,       // speed, for the bar
+    input  wire signed [2:0]  wheel,   // wheel angle, -2..2
     output reg         [5:0]  rgb
 );
     // colours, RR_GG_BB
@@ -414,6 +417,8 @@ module pixel_colour (
     localparam [5:0] KERB1    = 6'b11_00_00;
     localparam [5:0] GRASS0   = 6'b00_10_00;
     localparam [5:0] GRASS1   = 6'b00_11_00;
+    localparam [5:0] WHEEL0   = 6'b00_00_00;
+    localparam [5:0] WHEEL1   = 6'b10_10_10;
 
     // ---- regions, as bit slices of y (y < 480)
     wire sky  = (y[9:7] == 3'b000);                 // y < 128
@@ -437,16 +442,26 @@ module pixel_colour (
     wire [5:0] mh     = {1'b0, tri_w} + (u[6] ? {2'b00, tri_w[4:1]} : 6'd0);
     wire       peak   = ({1'b0, ~y[6:0]} < {2'b00, mh});  // 127 - y < height
 
-    // ---- speed bar: rows 432-447, columns 256 .. 256 + v
-    wire in_bar = (y[8:4] == 5'b11011) && (x[9:8] == 2'b01) && (x[7:0] < v);
+    // ---- speed bar: vertical, columns 64-95, v/2 rows up from the bottom row.
+    // Only used on dashboard rows, where 479 - y = 95 - y[6:0] is this slice.
+    wire [6:0] up     = {~y[6] & ~y[5], ~y[6] & y[5], ~y[4:0]};
+    wire       in_bar = (x[9:5] == 5'b00010) && (up < v[7:1]);
+
+    // ---- steering wheel, drawn over everything else
+    wire [1:0] wheel_code;
+    steering_wheel #(.FULL(WHEEL_FULL)) steer (
+        .x(x), .y(y), .w(wheel), .code(wheel_code)
+    );
 
     // ---- stage 1 registers. Everything else used below depends only on y,
     // or changes only during blanking, so it is the same for the pixel one
     // clock earlier (at a line change that pixel is in blanking anyway).
     reg [9:0] d_q;
+    reg [1:0] wheel_q;
     reg       peak_q, in_bar_q, active_q;
     always @(posedge clk) begin
         d_q      <= d;
+        wheel_q  <= WHEEL_FULL ? wheel_code : {1'b0, wheel_code[0]};
         peak_q   <= peak;
         in_bar_q <= in_bar;
         active_q <= active;
@@ -456,6 +471,8 @@ module pixel_colour (
     always @(*) begin
         if (!active_q)
             rgb = 6'b00_00_00;
+        else if (wheel_q != 2'd0)
+            rgb = (wheel_q == 2'd1) ? WHEEL0 : (wheel_q == 2'd2) ? BAR_COL : WHEEL1;
         else if (sky)
             rgb = peak_q ? MOUNTAIN :
                   (y[6:5] == 2'd0) ? SKY0 :
@@ -475,6 +492,84 @@ module pixel_colour (
             rgb = stripe ? GRASS1 : GRASS0;
     end
     wire _unused = &{A[5:0], h[7], band[2:0], 1'b0};
+endmodule
+
+// ==========================================================================
+// steering_wheel.v
+// ==========================================================================
+// Steering wheel in the foreground, centred on column 320, row 448 (the screen
+// cuts off its lower part). Purely combinational: its result is registered as
+// part of stage 1 of pixel_colour.
+//
+// The wheel angle w has five values, so there is no trigonometry:
+//   rim    two octagons, inside when a < R, b < R and a + b < sqrt(2) R,
+//          where a = |dx| and b = |dy| use bit inversion, not negation
+//   spoke  sheared by slope w/4 (a shift): the top bits of dy - w dx / 4 agree
+//
+// The centre and radius make dx and dy bit slices of the counters.
+// FULL = 0: for a 1x1 tile. Radius 64, 8 px rim, one spoke, one colour.
+// FULL = 1: for a 1x2 tile. Radius 96, 12 px rim, T of spokes, marker, hub.
+// code: 0 no wheel here, 1 black, 2 yellow, 3 grey.
+
+module steering_wheel #(parameter FULL = 0) (
+    input  wire [9:0] x,
+    input  wire [9:0] y,
+    input  wire signed [2:0] w,
+    output wire [1:0] code
+);
+    wire tilted   = (w[1:0] != 2'b00);
+    wire positive = ~w[2] & tilted;
+    wire negative =  w[2];
+
+    generate if (FULL) begin : g_full
+        wire on = (x >= 10'd192) & (x < 10'd448) & y[8] & (y[7] | y[6]);
+        wire [7:0] dx = {~(x[7] ^ x[6]), ~x[6], x[5:0]};    // -128..127
+        wire [7:0] dy = {y[7] ^ y[6],    ~y[6], y[5:0]};    // -128..31
+        wire [6:0] a  = dx[6:0] ^ {7{dx[7]}};
+        wire [6:0] b  = dy[6:0] ^ {7{dy[7]}};
+        wire [7:0] s  = a + b;
+
+        wire in_out = (a < 7'd96) & (b < 7'd96) & (s < 8'd136);
+        wire in_in  = (a < 7'd84) & (b < 7'd84) & (s < 8'd119);
+        wire rim    = in_out & ~in_in;
+        wire hub    = (a < 7'd14) & (b < 7'd14) & (s < 8'd20);
+
+        // marker on the top of the rim, 16 px wide, centred on dx = 16 w
+        wire [4:0] m    = dx[7:3] - {w[2], w, 1'b0};
+        wire      marker = rim & dy[7] & ((m == 5'd0) | (m == 5'b11111));
+
+        // shifts: |w| = 1 is >> 2, |w| = 2 is >> 1
+        wire [7:0] tx = !tilted ? 8'd0 : w[0] ? {{2{dx[7]}}, dx[7:2]} : {dx[7], dx[7:1]};
+        wire [7:0] ty = !tilted ? 8'd0 : w[0] ? {{2{dy[7]}}, dy[7:2]} : {dy[7], dy[7:1]};
+        wire [7:0] sh = dy + (tx ^ {8{positive}});          // across spoke
+        wire [7:0] sv = dx + (ty ^ {8{negative}});          // lower spoke
+        wire sp_h = (sh[7:3] == 5'd0) | (sh[7:3] == 5'b11111);
+        wire sp_v = ((sv[7:3] == 5'd0) | (sv[7:3] == 5'b11111)) & ~dy[7];
+
+        assign code = !on            ? 2'd0 :
+                      marker         ? 2'd2 :
+                      rim            ? 2'd1 :
+                      hub            ? 2'd2 :
+                      in_in & (sp_h | sp_v) ? 2'd3 : 2'd0;
+    end else begin : g_small
+        wire on = (x[9:7] == 3'b010) & y[8] & y[7];
+        wire [6:0] dx = {~x[6], x[5:0]};                    // -64..63
+        wire [6:0] dy = {~y[6], y[5:0]};
+        wire [5:0] a  = dx[5:0] ^ {6{dx[6]}};
+        wire [5:0] b  = dy[5:0] ^ {6{dy[6]}};
+        wire [6:0] s  = a + b;
+
+        wire in_in = (a < 6'd56) & (b < 6'd56) & (s < 7'd80);
+        wire rim   = (s < 7'd92) & ~in_in;                  // a, b < 64 from `on`
+
+        wire [6:0] t  = !tilted ? 7'd0 : w[0] ? {{2{dx[6]}}, dx[6:2]} : {dx[6], dx[6:1]};
+        wire [6:0] sh = dy + (t ^ {7{positive}});
+        wire spoke = in_in & ((sh[6:2] == 5'd0) | (sh[6:2] == 5'b11111));
+
+        assign code = {1'b0, on & (rim | spoke)};
+    end endgenerate
+
+    wire _unused = &{negative, 1'b0};
 endmodule
 
 // ==========================================================================

@@ -1,4 +1,4 @@
-read_verilog -sv ../rtl/project.v ../rtl/vga_timing.v ../rtl/ip_input_sync.v ../rtl/car_state.v ../rtl/line_setup.v ../rtl/pixel_colour.v ../rtl/engine_audio.v
+read_verilog -sv ../rtl/project.v ../rtl/vga_timing.v ../rtl/ip_input_sync.v ../rtl/car_state.v ../rtl/line_setup.v ../rtl/pixel_colour.v ../rtl/steering_wheel.v ../rtl/engine_audio.v
 synth -top tt_um_road_racer -flatten
 dfflegalize -cell $_DFF_P_ 01
 dfflibmap -liberty ../pdk/gf180_tt_025C_3v30.lib

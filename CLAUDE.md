@@ -21,6 +21,12 @@ It is a first-person pseudo-3D driving game drawn straight to VGA, with sound.
   about 80% of the core after LibreLane's additions, timing met at 40 ns.
 - Still to do by Yamin: email Vulkos the repo link (if not done) and ask
   whether a 1x2 tile is allowed.
+- Steering wheel: dev/rtl/steering_wheel.v, selected by WHEEL_FULL in
+  dev/rtl/project.v (0 = small for 1x1, the default; 1 = full for 1x2, also set
+  WHEEL_FULL = True in the model and `tiles: "1x2"`). Before LibreLane: small
+  34,247 um^2, full 36,851 um^2. `make chip` tests both.
+- Next after the wheel (Yamin's priorities): a car interior and dashboard
+  that look real, and curved roads.
 
 ## Yamin's machine
 

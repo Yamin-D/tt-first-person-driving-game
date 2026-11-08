@@ -16,7 +16,7 @@ RTL = os.path.join(DEV, "rtl")
 OUT = os.path.join(REPO, "src", "project.v")
 DEV_TOP = "tt_um_road_racer"
 ORDER = ["project.v", "vga_timing.v", "ip_input_sync.v", "car_state.v",
-         "line_setup.v", "pixel_colour.v", "engine_audio.v"]
+         "line_setup.v", "pixel_colour.v", "steering_wheel.v", "engine_audio.v"]
 
 def top_module_from_info():
     text = open(os.path.join(REPO, "info.yaml")).read()

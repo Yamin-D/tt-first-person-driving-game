@@ -10,7 +10,9 @@
  */
 `default_nettype none
 
-module tt_um_road_racer (
+module tt_um_road_racer #(
+    parameter WHEEL_FULL = 0        // 0: small wheel for 1x1, 1: full wheel for 1x2
+) (
     input  wire [7:0] ui_in,
     output wire [7:0] uo_out,
     input  wire [7:0] uio_in,
@@ -62,9 +64,9 @@ module tt_um_road_racer (
 
     // ---- per-pixel colour
     wire [5:0] rgb;
-    pixel_colour pix (
+    pixel_colour #(.WHEEL_FULL(WHEEL_FULL)) pix (
         .clk(clk), .x(x), .y(y), .active(active), .z(z), .A(A), .h(h),
-        .d_hi(D[8:5]), .v(v), .rgb(rgb)
+        .d_hi(D[8:5]), .v(v), .wheel(wheel), .rgb(rgb)
     );
 
     // ---- sound
@@ -91,5 +93,5 @@ module tt_um_road_racer (
     assign uio_out = {7'b0000000, audio};
     assign uio_oe  = 8'b0000_0001;
 
-    wire _unused = &{ena, uio_in, ui_in[7:4], wheel, D[4:0], frame, sample, 1'b0};
+    wire _unused = &{ena, uio_in, ui_in[7:4], D[4:0], frame, sample, 1'b0};
 endmodule

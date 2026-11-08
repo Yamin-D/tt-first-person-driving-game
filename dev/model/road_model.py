@@ -23,6 +23,8 @@ STRIPE_BIT = 3          # band half-period = 8 units of road
 D_SHIFT  = 5            # stripes use D >> 5 (4 bits)
 FOG_SY   = 32           # no stripes for s_y < 32 (s_y[7:5] == 0)
 V_MAX    = 192
+WHEEL_FULL = False      # False: small wheel for 1x1, True: full wheel for 1x2
+BAR_X0, BAR_X1 = 64, 96 # columns of the vertical speed bar
 ROAD_EDGE, KERB_EDGE = 64, 72   # |p| thresholds (W/H = 1, kerb is w/8)
 
 # RGB222 colours, written RR_GG_BB
@@ -35,6 +37,7 @@ LINE_COL = c(3,3,3)
 TARMAC   = (c(1,1,1), c(2,2,2))     # (stripe=0, stripe=1)
 KERB     = (c(3,3,3), c(3,0,0))
 GRASS    = (c(0,2,0), c(0,3,0))
+WHEEL0, WHEEL1 = c(0,0,0), c(2,2,2)
 
 # ---------------------------------------------------------------- divider
 def serial_recip(s_y):
@@ -104,6 +107,46 @@ class Car:
         self.D = (self.D + v) & 0x1FF
         self.n = (self.n + 1) & 0x7
 
+# ---------------------------------------------------------------- steering wheel
+def wheel_code(wheel, full):
+    """Per-pixel wheel code for the whole screen: 0 none, 1 black, 2 yellow,
+    3 grey. Centre (320, 448). a and b use bit inversion, as the hardware does;
+    negative shears are one's complement (no carry), which keeps the across
+    spoke exactly mirror-symmetric between w and -w."""
+    y_, x_ = np.mgrid[0:H_SCREEN, 0:W_SCREEN]
+    dx, dy = x_ - 320, y_ - 448
+    a = np.where(dx < 0, ~dx, dx)
+    b = np.where(dy < 0, ~dy, dy)
+    s = a + b
+    shift = {0: None, 1: 2, 2: 1}[abs(wheel)]       # slope wheel/4
+    tx = 0 * dx if shift is None else dx >> shift
+    sh = dy + ~tx if wheel > 0 else dy + tx
+    code = np.zeros_like(x_)
+    if full:
+        on = (x_ >= 192) & (x_ < 448) & (y_ >= 320)
+        in_out = (a < 96) & (b < 96) & (s < 136)
+        in_in  = (a < 84) & (b < 84) & (s < 119)
+        rim = in_out & ~in_in
+        hub = (a < 14) & (b < 14) & (s < 20)
+        m = (dx >> 3) - 2 * wheel
+        marker = rim & (dy < 0) & ((m == 0) | (m == -1))
+        ty = 0 * dy if shift is None else dy >> shift
+        sv = dx + ~ty if wheel < 0 else dx + ty
+        sp_h = (sh >= -8) & (sh < 8)
+        sp_v = (sv >= -8) & (sv < 8) & (dy >= 0)
+        code[in_in & (sp_h | sp_v)] = 3
+        code[hub] = 2
+        code[rim] = 1
+        code[marker] = 2
+    else:
+        on = (x_ >= 256) & (x_ < 384) & (y_ >= 384)
+        in_in = (a < 56) & (b < 56) & (s < 80)
+        rim = (s < 92) & ~in_in
+        spoke = in_in & (sh >= -4) & (sh < 4)
+        code[rim | spoke] = 1
+    code[~on] = 0
+    return code
+
 # ---------------------------------------------------------------- renderer
 def render(car):
     """Draw one frame exactly as the hardware would, line by line."""
@@ -113,7 +156,7 @@ def render(car):
     u = (x + car.h) & 0x7F                 # mountain column, wraps every 128 px
     tri = np.where(u & 0x20, 31 - (u & 0x1F), u & 0x1F)        # 0..31 ramp
     mountain_h = tri + np.where(u & 0x40, tri >> 1, 0)          # alternate peaks
-    bar = (x >= 256) & (x < 256 + car.v)
+    bar = (x >= BAR_X0) & (x < BAR_X1)
     A = 0
     for y in range(H_SCREEN):
         if y < HORIZON:
@@ -122,7 +165,7 @@ def render(car):
             img[y] = row
         elif y >= DASH_TOP:
             row = np.full(W_SCREEN, DASH_COL, np.uint8)
-            if 432 <= y < 448:
+            if H_SCREEN - 1 - y < car.v >> 1:   # v/2 rows up from the bottom
                 row[bar] = BAR_COL
             img[y] = row
         else:
@@ -148,6 +191,10 @@ def render(car):
             A = (car.h - 320) << 6         # centre offset folded into A
         elif HORIZON <= y < DASH_TOP:
             A += car.p
+    code = wheel_code(car.wheel, WHEEL_FULL)
+    img[code == 1] = WHEEL0
+    img[code == 2] = BAR_COL
+    img[code == 3] = WHEEL1
     return img
 
 def to_rgb(img):
