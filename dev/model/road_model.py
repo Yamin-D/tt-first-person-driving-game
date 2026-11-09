@@ -24,7 +24,7 @@ D_SHIFT  = 5            # stripes use D >> 5 (4 bits)
 FOG_SY   = 32           # no stripes for s_y < 32 (s_y[7:5] == 0)
 V_MAX    = 192
 WHEEL_FULL = True       # False: small wheel for 1x1, True: full wheel for 1x2
-ROAD_EDGE, KERB_EDGE = 64, 72   # |p| thresholds (W/H = 1, kerb is w/8)
+ROAD_EDGE, KERB_EDGE = 96, 108   # |p| thresholds (W/H = 1, kerb is w/8)
 
 # curvature wanted in each of the 16 track segments (64 distance wraps each).
 # kappa is 4 bits; a negative value's magnitude is its bit inversion, so 5 and
@@ -33,7 +33,7 @@ TRACK = [0, 0, 5, 5, 0, -6, -6, 0, 7, -8, 0, -5, -5, 6, 0, 0]
 Z_SAT_SY = 9            # rows with s_y below this use z = 2047
 
 # traffic. Depths are 12 bits with 1 fraction bit: Z >> 1 compares with row depth z.
-LANE_P     = 32         # sideways position of the right lane's centre
+LANE_P     = 48         # sideways position of the right lane's centre
 SLOW_STEP  = 6          # per frame, added to the slow car's depth
 ONC_STEP   = -4        # per frame, added to the oncoming car's depth
 FAR_HOLD   = 4032      # the slow car stops drawing away at this depth
@@ -78,12 +78,13 @@ def serial_recip(s_y):
 # ---------------------------------------------------------------- car state
 P_FRAC = 6             # fraction bits on the sideways position
 
-LIMIT = 96             # |h| and |p| stop growing outwards beyond this
+LIMIT = 96             # |h| stops growing outwards beyond this
+P_LIMIT = 120          # and |p| beyond this
 
-def at_limit(value, step):
+def at_limit(value, step, limit=LIMIT):
     """True if adding `step` would push `value` further past +/-96. The
     hardware tests only the top three bits: value >= 96 or value <= -97."""
-    return (step > 0 and value >= LIMIT) or (step < 0 and value <= -LIMIT - 1)
+    return (step > 0 and value >= limit) or (step < 0 and value <= -limit - 1)
 
 class Car:
     def __init__(self):
@@ -140,7 +141,7 @@ class Car:
         if not at_limit(self.h, dh):
             self.h += dh
         dP = self.h * k
-        if not at_limit(self.p, dP):
+        if not at_limit(self.p, dP, P_LIMIT):
             self.P += dP
         total = self.D + v
         self.D = total & 0x1FF
@@ -175,7 +176,7 @@ class Car:
                 self.ones = 0
                 self.tens = (self.tens + 1) % 10
         p = self.p
-        hit = (self.slow < NEAR_Z and 0 <= p < 64) or (self.onc < NEAR_Z and -64 <= p < 0)
+        hit = (self.slow < NEAR_Z and 0 <= p < 96) or (self.onc < NEAR_Z and -96 <= p < 0)
         if hit:
             self.crash = CRASH_FRAMES
             self.v = self.wheel = self.h = 0
@@ -267,54 +268,55 @@ def draw_cars(row, d, left, s_y, car, now):
     The side panel lies beyond the rear face and stops at the road's ground line
     for that row, so it vanishes when the car is straight ahead."""
     x = np.arange(W_SCREEN)
-    a_row, b_row = s_y >> 2, (s_y >> 1) + (s_y >> 2)
+    Sy = s_y + (s_y >> 1)
+    a_row, b_row = Sy >> 2, (Sy >> 1) + (Sy >> 2)
     for (Ae, s), base, is_left, body, lamp, flank, glass in (
             (car.cap_slow, now[0], False, SLOW_BODY, SLOW_LAMP, SLOW_SIDE, SLOW_GLASS),
             (car.cap_onc, now[1], True, ONC_BODY, ONC_LAMP, ONC_SIDE, ONC_GLASS)):
         # below this frame's base row the stored value has already been replaced
         if base is not None and s_y > base[1]:
             continue
-        if s_y > s or s_y < (s >> 1) + (s >> 3):        # a cuboid, 3/8 s tall
+        if s_y > s or s_y < (s >> 1):                   # a cuboid, s/2 tall
             continue
         dc = ((x + Ae + 1024) & 2047) - 1024
         da = np.where(dc < 0, ~dc, dc) & 1023
         lane = (dc < 0) if is_left else (dc >= 0)
         road_side = left if is_left else ~left
-        a, b, w = s >> 2, (s >> 1) + (s >> 2), s >> 3
+        S = s + (s >> 1)
+        a, b, w = S >> 2, (S >> 1) + (S >> 2), S >> 3
         inner = lane & road_side & (da >= a - w) & (da < a) & (d >= a_row)
         outer = lane & road_side & (da >= b) & (da < b + w) & (d < b_row)
         row[inner | outer] = flank
         face = lane & (da >= a) & (da < b)
-        outside = (da < a + (s >> 4)) | (da >= b - (s >> 4))
+        outside = (da < a + (S >> 4)) | (da >= b - (S >> 4))
         row[face] = body
         # the top band is the window; an oncoming car's windscreen is taller
-        if s_y < (s >> 1) + (s >> 3) + ((s >> 2) if is_left else (s >> 3)):
+        if s_y < (s >> 1) + ((s >> 2) if is_left else (s >> 3)):
             row[face & ~outside] = glass
         else:
             row[face & outside] = lamp
 
 def score_code(tens, ones, v):
     """0 none, 1 panel, 2 lit segment, rows 384-447: the score at columns 128-191
-    and the speed, v/2 so 0..96, at columns 32-95."""
+    and a speed bar, v/4 rows tall, in the panel at columns 32-95."""
     y_, x_ = np.mgrid[0:H_SCREEN, 0:W_SCREEN]
     rows = (y_ >= 384) & (y_ < 448)
     right = (x_ >= 128) & (x_ < 192) & rows
     left = (x_ >= 32) & (x_ < 96) & rows
     panel = right | left
-    speed = v >> 1
     cx, cy = (x_ >> 2) & 7, (y_ >> 3) & 7
     mid = (cx >= 1) & (cx <= 5)
     upper, lower = (cy >= 1) & (cy <= 3), (cy >= 5) & (cy <= 6)
     parts = dict(a=mid & (cy == 0), b=(cx == 6) & upper, c=(cx == 6) & lower, d=mid & (cy == 7),
                  e=(cx == 0) & lower, f=(cx == 0) & upper, g=mid & (cy == 4))
     lit = np.zeros_like(x_, dtype=bool)
-    for digit, columns in ((tens, right & (x_ < 160)), (ones, right & (x_ >= 160)),
-                           (speed // 10, left & (x_ < 64)), (speed % 10, left & (x_ >= 64))):
+    for digit, columns in ((tens, right & (x_ < 160)), (ones, right & (x_ >= 160))):
         for name in SEGMENTS[digit]:
             lit |= parts[name] & columns
     code = np.zeros_like(x_)
     code[panel] = 1
     code[panel & lit] = 2
+    code[left & (x_ >= 48) & (x_ < 80) & (447 - y_ < v >> 2)] = 2
     return code
 
 # ---------------------------------------------------------------- interior
@@ -370,7 +372,7 @@ def render(car):
                 img[y] = GRASS[0]
             else:
                 z = serial_recip(s_y)      # computed in previous line's hblank
-                w = s_y
+                w = s_y + (s_y >> 1)       # the road is 1.5 x wider than the eye is high
                 kerb_w = w + (w >> 3)
                 dash_w = (w >> 5) + 1
                 dx = x + line_centre(A, z, s_y, car.kappa)   # x - centre, one adder

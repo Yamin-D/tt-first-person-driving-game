@@ -222,7 +222,7 @@ module car_state (
     // |p| >= 72 without working out |p|: compare against constants. Registered:
     // P changes only on step_p, long before the next frame pulse reads it.
     always @(posedge clk)
-        offroad <= (p >= 8'sd72) || (p <= -8'sd72);
+        offroad <= (p >= 8'sd108) || (p <= -8'sd108);
 
     // ---- speed: one small signed step, one adder, clamp at zero
     reg signed [3:0] d;
@@ -285,7 +285,7 @@ module car_state (
     wire        [11:0] z_next = z_hold ? z_now : z_sum[11:0];
     wire near_s = (slow[11:7] == 5'd0);
     wire near_o = (onc[11:7] == 5'd0);
-    wire hit = (near_s & ~p[7] & ~p[6]) | (near_o & p[7] & p[6]);
+    wire hit = (near_s & ~p[7] & (p[6:5] != 2'b11)) | (near_o & p[7] & (p[6:5] != 2'b00));
     always @(posedge clk) begin
         flash    <= crashing;
         clr_slow <= (step_s & z_under) | (step_x & hit);
@@ -332,7 +332,8 @@ module car_state (
     // position: P + h*k, held once |p| passes 96
     wire signed [13:0] h14   = {{6{h[7]}}, h};
     wire signed [13:0] dP    = k2 ? (h14 <<< 1) : (k1 ? h14 : 14'sd0);
-    wire               P_stop = at_limit(P[13:11], h[7], (h == 8'sd0) || !(k1 || k2));
+    wire               P_stop = !((h == 8'sd0) || !(k1 || k2)) &&
+                                (h[7] ? (P[13:9] == 5'b10000) : (P[13:9] == 5'b01111));
     wire signed [13:0] P1    = P_stop ? P : P + dP;
 
     // Reset reaches about 150 registers here, so it is split into three. They
@@ -392,7 +393,7 @@ module car_state (
     always @(posedge clk) begin
         if (!rst_pos) begin
             h <= 8'sd0;
-            P <= 14'sd2048;                // right lane
+            P <= 14'sd3072;                // right lane
             D <= 9'd0;
         end else begin
             if (step_h)
@@ -403,7 +404,7 @@ module car_state (
             end
             if (step_x & hit) begin
                 h <= 8'sd0;
-                P <= 14'sd2048;
+                P <= 14'sd3072;
             end
         end
     end
@@ -649,10 +650,15 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire dash = y_q[8] & (y_q[7] | (y_q[6] & y_q[5]));// y >= 352
     wire [7:0] s_y = {~y_q[7], y_q[6:0]};             // y - 128, valid on road rows
     wire [7:0] s_now = {~y[7], y[6:0]};               // the same one clock sooner
+    // the road's half-width is 1.5 s_y
+    wire [8:0] w_now = {1'b0, s_now} + {2'b00, s_now[7:1]};
+    reg  [8:0] road_w_q;
+    always @(posedge clk)
+        road_w_q <= w_now;
 
     // ---- road geometry for this line (w = s_y)
-    wire [8:0] kerb_w = {1'b0, s_y} + {4'b0000, s_y[7:3]};
-    wire [3:0] dash_w = {1'b0, s_y[7:5]} + 4'd1;
+    wire [9:0] kerb_w = {1'b0, road_w_q} + {4'b0000, road_w_q[8:3]};
+    wire [4:0] dash_w = {1'b0, road_w_q[8:5]} + 5'd1;
 
     wire signed [10:0] dx = $signed({1'b0, x}) + Ae;    // x - centre
     wire        [9:0]  d  = dx[10] ? ~dx[9:0] : dx[9:0]; // |dx|, or |dx| - 1 when negative
@@ -710,27 +716,27 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     // adder: the slow car (right of its reference) is x + Ae - s/4, and the
     // oncoming car is ~(x + Ae + s/4). Both constants change only at the base row.
     reg signed [10:0] k_slow, k_onc;
+    wire [8:0] big_slow = {1'b0, s_slow} + {2'b00, s_slow[7:1]};
+    wire [8:0] big_onc  = {1'b0, s_onc}  + {2'b00, s_onc[7:1]};
     always @(posedge clk) begin
-        k_slow <= ae_slow - $signed({5'b00000, s_slow[7:2]});
-        k_onc  <= ae_onc  + $signed({5'b00000, s_onc[7:2]});
+        k_slow <= ae_slow - $signed({4'b0000, big_slow[8:2]});
+        k_onc  <= ae_onc  + $signed({4'b0000, big_onc[8:2]});
     end
     wire [10:0] u_slow =   $signed({1'b0, x}) + k_slow;
     wire [10:0] u_onc  = ~($signed({1'b0, x}) + k_onc);
     reg  [10:0] u_slow_q, u_onc_q;
     // row tests for the next pixel stage, from y one clock sooner
     reg rows_slow_q, rows_onc_q, win_slow_q, win_onc_q;
-    reg [7:0] col_b_q;
-    wire [8:0] top_slow = {2'b00, s_slow[7:1]} + {4'b0000, s_slow[7:3]};
-    wire [8:0] top_onc  = {2'b00, s_onc[7:1]}  + {4'b0000, s_onc[7:3]};
+    reg [8:0] col_b_q;
     always @(posedge clk) begin
-        rows_slow_q <= ({1'b0, s_now} >= top_slow) && (s_now <= s_slow);
-        rows_onc_q  <= ({1'b0, s_now} >= top_onc)  && (s_now <= s_onc);
-        win_slow_q  <= ({1'b0, s_now} < top_slow + {4'b0000, s_slow[7:3]});
-        win_onc_q   <= ({1'b0, s_now} < top_onc  + {3'b000, s_onc[7:2]});
-        col_b_q     <= {1'b0, s_now[7:1]} + {2'b00, s_now[7:2]};
+        rows_slow_q <= (s_now >= {1'b0, s_slow[7:1]}) && (s_now <= s_slow);
+        rows_onc_q  <= (s_now >= {1'b0, s_onc[7:1]})  && (s_now <= s_onc);
+        win_slow_q  <= ({1'b0, s_now} < {2'b00, s_slow[7:1]} + {4'b0000, s_slow[7:3]});
+        win_onc_q   <= ({1'b0, s_now} < {2'b00, s_onc[7:1]}  + {3'b000, s_onc[7:2]});
+        col_b_q     <= {1'b0, w_now[8:1]} + {2'b00, w_now[8:2]};
     end
 
-    wire [7:0] col_a  = {2'b00, s_y[7:2]};
+    wire [7:0] col_a  = {1'b0, road_w_q[8:2]};
 
     // ---- score, on the dashboard
     wire [1:0] score_code;
@@ -823,11 +829,11 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
             rgb = (slow_kind == 2'd1) ? SLOW_BODY : (slow_kind == 2'd2) ? SLOW_GLASS : SLOW_LAMP;
         else if (slow_side)
             rgb = SLOW_SIDE;
-        else if (stripe && d_q < {6'd0, dash_w})
+        else if (stripe && d_q < {5'd0, dash_w})
             rgb = LINE_COL;
-        else if (d_q < {2'b00, s_y})
+        else if (d_q < {1'b0, road_w_q})
             rgb = stripe ? TARMAC1 : TARMAC0;
-        else if (d_q < {1'b0, kerb_w})
+        else if (d_q < kerb_w)
             rgb = stripe ? KERB1 : KERB0;
         else
             rgb = stripe ? GRASS1 : GRASS0;
@@ -974,9 +980,8 @@ endmodule
 // ==========================================================================
 // score_display.v
 // ==========================================================================
-// Two pairs of seven-segment digits on the dashboard, rows 384-447: the score at
-// columns 128-191 and the speed (v / 2, 0..96) at columns 32-95. One decoder
-// serves all four digits, since only one is being scanned at a time. Each digit is a 32 x 64 cell of 4 x 8 pixel blocks, cx 0-7 and cy 0-7.
+// The dashboard readouts, rows 384-447: the score as two seven-segment digits at
+// columns 128-191, and a speed bar in the panel at columns 32-95. Each digit is a 32 x 64 cell of 4 x 8 pixel blocks, cx 0-7 and cy 0-7.
 // code: 0 none, 1 panel, 2 lit segment.
 
 module score_display (
@@ -988,32 +993,19 @@ module score_display (
     input  wire [3:0] ones,
     output wire [1:0] code
 );
-    // speed in BCD by shift-and-add-3, registered: v only changes once a frame
-    reg [7:0] bcd, speed;
-    integer i;
-    always @(*) begin
-        bcd = 8'd0;
-        for (i = 7; i >= 1; i = i - 1) begin
-            if (bcd[3:0] >= 4'd5) bcd[3:0] = bcd[3:0] + 4'd3;
-            if (bcd[7:4] >= 4'd5) bcd[7:4] = bcd[7:4] + 4'd3;
-            bcd = {bcd[6:0], v[i]};
-        end
-    end
-    always @(posedge clk)
-        speed <= bcd;
-
     wire       right = (x[9:6] == 4'b0010);
     wire       left  = (x[9:5] == 5'b00001) | (x[9:5] == 5'b00010);
     wire       panel = (right | left) & (y[8:6] == 3'b110);
     wire [2:0] cx    = x[4:2];
     wire [2:0] cy    = y[5:3];
+    // the speed bar: v / 4 rows up from the panel's bottom row, in columns 48-79
+    wire       bar   = left & ((x[9:4] == 6'd3) | (x[9:4] == 6'd4)) & (~y[5:0] < v[7:2]);
     // Which digit is next is worked out one column ahead and registered, which
     // takes the digit choice off the path from x through the segment decoder.
     wire       next5 = x[5] ^ (&x[4:0]);
-    wire       next7 = x[7] ^ (&x[6:0]);
     reg  [3:0] digit;
     always @(posedge clk)
-        digit <= next7 ? (next5 ? ones : tens) : (next5 ? speed[7:4] : speed[3:0]);
+        digit <= next5 ? ones : tens;
 
     reg [6:0] seg;                                          // gfedcba
     always @(*) begin
@@ -1039,16 +1031,17 @@ module score_display (
                (seg[4] & (cx == 3'd0) & lower) | (seg[5] & (cx == 3'd0) & upper) |
                (seg[6] & mid & (cy == 3'd4));
 
-    assign code = !panel ? 2'd0 : lit ? 2'd2 : 2'd1;
-    wire _unused = &{v[0], 1'b0};
+    assign code = !panel ? 2'd0 : ((right & lit) | bar) ? 2'd2 : 2'd1;
+    wire _unused = &{v[1:0], 1'b0};
 endmodule
 
 // ==========================================================================
 // car_shape.v
 // ==========================================================================
 // The shape of one upright car in the current row and column: a cuboid. s is
-// the car's base row; its rear face is s/2 wide and 3s/8 tall, with lamps at
-// the outer eighths. The side panel lies just beyond the rear face and stops at
+// the car's base row. The road and cars are 1.5 x wider than s, so S = 1.5 s:
+// the rear face is S/2 wide, with lamps at the outer sixteenths and a window
+// band above them. The side panel lies just beyond the rear face and stops at
 // the road's ground line for this row, so it vanishes when the car is straight
 // ahead. Purely combinational, in stage 2 of pixel_colour.
 
@@ -1059,14 +1052,15 @@ module car_shape (
     input  wire [10:0] u,        // columns from the rear face's near edge, registered
     input  wire       road_side, // on this car's side of the road centre
     input  wire [9:0] d,         // |x - road centre| for this row
-    input  wire [7:0] col_a,     // s_y / 4
-    input  wire [7:0] col_b,     // 3 s_y / 4, registered
+    input  wire [7:0] col_a,     // 3 s_y / 8, registered
+    input  wire [8:0] col_b,     // 9 s_y / 8, registered
     output wire [1:0] kind,      // 0 none, 1 body, 2 glass, 3 lamp
     output wire       side
 );
-    wire [7:0] half  = {1'b0, s[7:1]};
-    wire [7:0] w     = {3'b000, s[7:3]};
-    wire [7:0] w2    = {4'b0000, s[7:4]};        // lamp width
+    wire [8:0] big   = {1'b0, s} + {2'b00, s[7:1]};     // S
+    wire [7:0] half  = big[8:1];
+    wire [7:0] w     = {2'b00, big[8:3]};
+    wire [7:0] w2    = {3'b000, big[8:4]};              // lamp width
     wire [7:0] h_w   = half - w2;
     wire [8:0] h_p   = {1'b0, half} + {1'b0, w};
 
@@ -1082,7 +1076,7 @@ module car_shape (
                   window ? (lamp ? 2'd1 : 2'd2) : (lamp ? 2'd3 : 2'd1);
 
     wire inner = neg & (u[9:8] == 2'b11) & (~ul < w) & (d >= {2'b00, col_a});
-    wire outer = near & ~lt_half & ({1'b0, ul} < h_p) & (d < {2'b00, col_b});
+    wire outer = near & ~lt_half & ({1'b0, ul} < h_p) & (d < {1'b0, col_b});
     assign side = rows & road_side & (inner | outer);
 endmodule
 

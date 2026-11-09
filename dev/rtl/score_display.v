@@ -1,6 +1,5 @@
-// Two pairs of seven-segment digits on the dashboard, rows 384-447: the score at
-// columns 128-191 and the speed (v / 2, 0..96) at columns 32-95. One decoder
-// serves all four digits, since only one is being scanned at a time. Each digit is a 32 x 64 cell of 4 x 8 pixel blocks, cx 0-7 and cy 0-7.
+// The dashboard readouts, rows 384-447: the score as two seven-segment digits at
+// columns 128-191, and a speed bar in the panel at columns 32-95. Each digit is a 32 x 64 cell of 4 x 8 pixel blocks, cx 0-7 and cy 0-7.
 // code: 0 none, 1 panel, 2 lit segment.
 `default_nettype none
 
@@ -13,32 +12,19 @@ module score_display (
     input  wire [3:0] ones,
     output wire [1:0] code
 );
-    // speed in BCD by shift-and-add-3, registered: v only changes once a frame
-    reg [7:0] bcd, speed;
-    integer i;
-    always @(*) begin
-        bcd = 8'd0;
-        for (i = 7; i >= 1; i = i - 1) begin
-            if (bcd[3:0] >= 4'd5) bcd[3:0] = bcd[3:0] + 4'd3;
-            if (bcd[7:4] >= 4'd5) bcd[7:4] = bcd[7:4] + 4'd3;
-            bcd = {bcd[6:0], v[i]};
-        end
-    end
-    always @(posedge clk)
-        speed <= bcd;
-
     wire       right = (x[9:6] == 4'b0010);
     wire       left  = (x[9:5] == 5'b00001) | (x[9:5] == 5'b00010);
     wire       panel = (right | left) & (y[8:6] == 3'b110);
     wire [2:0] cx    = x[4:2];
     wire [2:0] cy    = y[5:3];
+    // the speed bar: v / 4 rows up from the panel's bottom row, in columns 48-79
+    wire       bar   = left & ((x[9:4] == 6'd3) | (x[9:4] == 6'd4)) & (~y[5:0] < v[7:2]);
     // Which digit is next is worked out one column ahead and registered, which
     // takes the digit choice off the path from x through the segment decoder.
     wire       next5 = x[5] ^ (&x[4:0]);
-    wire       next7 = x[7] ^ (&x[6:0]);
     reg  [3:0] digit;
     always @(posedge clk)
-        digit <= next7 ? (next5 ? ones : tens) : (next5 ? speed[7:4] : speed[3:0]);
+        digit <= next5 ? ones : tens;
 
     reg [6:0] seg;                                          // gfedcba
     always @(*) begin
@@ -64,6 +50,6 @@ module score_display (
                (seg[4] & (cx == 3'd0) & lower) | (seg[5] & (cx == 3'd0) & upper) |
                (seg[6] & mid & (cy == 3'd4));
 
-    assign code = !panel ? 2'd0 : lit ? 2'd2 : 2'd1;
-    wire _unused = &{v[0], 1'b0};
+    assign code = !panel ? 2'd0 : ((right & lit) | bar) ? 2'd2 : 2'd1;
+    wire _unused = &{v[1:0], 1'b0};
 endmodule

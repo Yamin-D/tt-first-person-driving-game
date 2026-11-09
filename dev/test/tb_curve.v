@@ -28,7 +28,7 @@ module tb_curve;
         for (ip = 0; ip < 3; ip = ip + 1)
         for (ik = -8; ik < 8; ik = ik + 1) begin
             h = pick(ih, -101, 101);
-            p = pick(ip, -100, 99);
+            p = pick(ip, -121, 120);
             kappa = ik;
             for (row = 127; row <= 382; row = row + 1) begin
                 y = row;

@@ -44,7 +44,7 @@ module car_state (
     // |p| >= 72 without working out |p|: compare against constants. Registered:
     // P changes only on step_p, long before the next frame pulse reads it.
     always @(posedge clk)
-        offroad <= (p >= 8'sd72) || (p <= -8'sd72);
+        offroad <= (p >= 8'sd108) || (p <= -8'sd108);
 
     // ---- speed: one small signed step, one adder, clamp at zero
     reg signed [3:0] d;
@@ -107,7 +107,7 @@ module car_state (
     wire        [11:0] z_next = z_hold ? z_now : z_sum[11:0];
     wire near_s = (slow[11:7] == 5'd0);
     wire near_o = (onc[11:7] == 5'd0);
-    wire hit = (near_s & ~p[7] & ~p[6]) | (near_o & p[7] & p[6]);
+    wire hit = (near_s & ~p[7] & (p[6:5] != 2'b11)) | (near_o & p[7] & (p[6:5] != 2'b00));
     always @(posedge clk) begin
         flash    <= crashing;
         clr_slow <= (step_s & z_under) | (step_x & hit);
@@ -154,7 +154,8 @@ module car_state (
     // position: P + h*k, held once |p| passes 96
     wire signed [13:0] h14   = {{6{h[7]}}, h};
     wire signed [13:0] dP    = k2 ? (h14 <<< 1) : (k1 ? h14 : 14'sd0);
-    wire               P_stop = at_limit(P[13:11], h[7], (h == 8'sd0) || !(k1 || k2));
+    wire               P_stop = !((h == 8'sd0) || !(k1 || k2)) &&
+                                (h[7] ? (P[13:9] == 5'b10000) : (P[13:9] == 5'b01111));
     wire signed [13:0] P1    = P_stop ? P : P + dP;
 
     // Reset reaches about 150 registers here, so it is split into three. They
@@ -214,7 +215,7 @@ module car_state (
     always @(posedge clk) begin
         if (!rst_pos) begin
             h <= 8'sd0;
-            P <= 14'sd2048;                // right lane
+            P <= 14'sd3072;                // right lane
             D <= 9'd0;
         end else begin
             if (step_h)
@@ -225,7 +226,7 @@ module car_state (
             end
             if (step_x & hit) begin
                 h <= 8'sd0;
-                P <= 14'sd2048;
+                P <= 14'sd3072;
             end
         end
     end
