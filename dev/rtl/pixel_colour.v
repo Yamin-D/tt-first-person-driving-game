@@ -213,10 +213,14 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire [1:0] slow_kind;       // 0 none, 1 body, 3 lamp
     wire [1:0] onc_kind;
     wire       slow_side, onc_side;
-    car_shape shape_slow (.s(s_slow), .rows(rows_slow_q), .window(win_slow_q), .u(u_slow_q),
+    wire [7:0] h_w_slow = s_slow - {3'b000, s_slow[7:3]};
+    reg  [7:0] h_w_onc;                       // registered: it was the slowest path
+    always @(posedge clk)
+        h_w_onc <= s_onc - {3'b000, s_onc[7:3]};
+    car_shape shape_slow (.s(s_slow), .h_w(h_w_slow), .rows(rows_slow_q), .window(win_slow_q), .u(u_slow_q),
                           .road_side(~left_q), .d(d_q), .col_a(col_a), .col_b(col_b_q),
                           .kind(slow_kind), .side(slow_side));
-    car_shape shape_onc  (.s(s_onc), .rows(rows_onc_q), .window(win_onc_q), .u(u_onc_q),
+    car_shape shape_onc  (.s(s_onc), .h_w(h_w_onc), .rows(rows_onc_q), .window(win_onc_q), .u(u_onc_q),
                           .road_side(left_q), .d(d_q), .col_a(col_a), .col_b(col_b_q),
                           .kind(onc_kind), .side(onc_side));
     always @(*) begin

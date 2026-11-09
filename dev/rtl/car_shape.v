@@ -8,6 +8,7 @@
 
 module car_shape (
     input  wire [7:0] s,
+    input  wire [7:0] h_w,       // s - s/8: the far lamp's edge
     input  wire       rows,      // this row is inside the car, registered
     input  wire       window,    // this row is in the window band, registered
     input  wire [10:0] u,        // columns from the rear face's near edge, registered
@@ -21,7 +22,6 @@ module car_shape (
     wire [7:0] half  = s;
     wire [7:0] w     = {2'b00, s[7:2]};
     wire [7:0] w2    = {3'b000, s[7:3]};                // lamp width
-    wire [7:0] h_w   = half - w2;
     wire [8:0] h_p   = {1'b0, half} + {1'b0, w};
 
     // everything is measured from the rear face's near edge
