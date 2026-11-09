@@ -9,10 +9,11 @@ distance. With the eye at height H and focal length f, row s_y below the horizon
 shows the road at distance z = fH / s_y. That is the only division in the
 design: a small serial divider produces one quotient bit per clock while the
 previous line is in horizontal blanking. Everything else is linear in s_y, so
-the road's half-width is just s_y and the steering offset is built by adding
-the car's sideways position once per line. Stripes, kerbs and the centre line
-come from one bit of z plus the distance travelled, so they rush towards you as
-you speed up.
+the road's half-width is just twice s_y and the steering offset is built by
+adding the car's sideways position once per line. Stripes, kerbs and the centre
+line come from one bit of z plus the distance travelled, so they rush towards
+you as you speed up. Above the road, a sunset is drawn with a five-colour sky and
+a checkerboard between its bands, behind a triangle-wave ridge of mountains.
 
 **Driving.** Once per frame the car's speed, wheel angle, heading and sideways
 position are updated. Holding left or right turns the wheel; the heading follows
@@ -23,17 +24,20 @@ the horizon. On the grass the car is slowed down.
 **Curves.** A road bending with curvature k has a sideways offset of k z^2 / 2 at
 distance z, so after perspective its offset on screen is proportional to z. The
 divider already produces z, so each line's offset is up to three shifted adds in
-horizontal blanking. The track is a loop of 16 segments, and hard bends push the
-car outwards, so you have to steer through them.
+horizontal blanking. The track is a loop of 16 segments, curvature eases in and
+out with distance, and every bend pushes the car outwards, so you have to steer
+through them.
 
-**Traffic.** You drive on the right. A slow car holds your lane and oncoming cars
-use the left lane, so overtaking means judging the gap. A car's depth is compared
-with each row's depth, so perspective and the road's curves apply automatically.
-Hitting a car stops you for about a second and resets the score, which counts cars
-overtaken and is shown on the dashboard.
+**Traffic.** You drive on the right. A slow car holds your lane and an oncoming
+car uses the left lane, so overtaking means judging the gap. Scanning down the
+screen, the last row whose depth reaches a car's depth is that car's base. Its
+screen position and size are stored at that row and the next frame draws the car
+from them, so it stands upright with one width for all its rows, with a window
+band, lamps and a side panel. Hitting a car stops you for about a second and
+resets the score, which counts cars overtaken and is shown on the dashboard.
 
 **Interior.** You sit on the left of the car: a roof, a left pillar with a tinted
-side window beyond it, a mirror, and a dashboard with vents.
+side window beyond it, a mirror, and a dashboard with a slatted centre console.
 All of it is static, tested per pixel from counter bits and one adder.
 
 **Steering wheel.** A steering wheel is drawn in the foreground and turns as you
@@ -42,8 +46,8 @@ the gap between two octagons, tested from |dx|, |dy| and |dx| + |dy|, and the
 spoke is sheared with a slope of wheel/4, which is a shift.
 
 **Sound.** The engine note is a sawtooth plus a square an octave below, with a
-pitch that rises with speed (about 61 Hz idling to 244 Hz flat out). Off the road,
-noise from an LFSR is mixed in for a gravel rumble. The audio pin is PWM.
+pitch that rises with speed (about 61 Hz idling to 244 Hz flat out). Off the road
+and in a crash, noise from an LFSR is mixed in. The audio pin is PWM.
 
 The design was written against a bit-exact Python model and checked frame by
 frame against it from the VGA pins.
@@ -55,8 +59,8 @@ frame against it from the VGA pins.
 2. Set the clock to 25 MHz (25.175 MHz is the ideal VGA value; both work).
 3. Hold rst_n low for a few clocks, then release it.
 4. Inputs (active high): ui[0] steer left, ui[1] steer right, ui[2] accelerate,
-   ui[3] brake. The number on the dashboard is your score, the cars overtaken. The engine
-   note rises with your speed.
+   ui[3] brake. The number on the dashboard is your score, the cars overtaken.
+   The engine note rises with your speed.
 
 ## External hardware
 

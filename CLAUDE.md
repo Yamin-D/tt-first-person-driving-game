@@ -7,31 +7,30 @@ It is a first-person pseudo-3D driving game drawn straight to VGA, with sound.
 - **Deadline: Monday 16 November 2026.** Entry = this repository's link,
   emailed to contact@vulkos.co.uk once the Datasheet, Tests and Layout build
   checks are green on the latest commit. Pushing more commits updates the entry.
-- Stage 1 (current) passes all three GitHub checks on a 1x1 tile.
+- `main` is the 1x2 design. `1x1-fallback` keeps the last 1x1 version.
 - Yamin also uses Vulkos (web IDE with LibreLane and a VGA preview). Vulkos
   pushes to and pulls from this repo; after pushing from here, he must use
   "Cool stuff > Pull from GitHub" in Vulkos before pushing from Vulkos again.
 
-## Status (8 Nov 2026)
+## Status (9 Nov 2026)
 
-- Stage 1 pushed and green: Datasheet, Tests, Layout build (GDS, precheck,
-  gate-level test). Tiny Tapeout's own build reported no setup or hold
-  violations and about 69% utilisation at global placement on 1x1.
-- Yamin's local LibreLane run in Vulkos on 1x1: DRC, LVS and antenna clean,
-  about 80% of the core after LibreLane's additions, timing met at 40 ns.
-- Still to do by Yamin: email Vulkos the repo link (if not done) and ask
-  whether a 1x2 tile is allowed.
-- Steering wheel: dev/rtl/steering_wheel.v, selected by WHEEL_FULL in
-  dev/rtl/project.v (0 = small for 1x1, the default; 1 = full for 1x2, also set
-  WHEEL_FULL = True in the model and `tiles: "1x2"`). Before LibreLane: small
-  34,247 um^2, full 36,851 um^2. `make chip` tests both.
-  Tiny Tapeout build of the small wheel on 1x1: 84.1% core utilisation, worst
-  slow-corner setup slack +3.47 ns, 4 routing passes, DRC/LVS/antenna clean.
-  1x1 is now full. Slack moves by a few ns between layouts (the build before
-  the wheel had -0.20 ns and CI stayed green), so read final/metrics.json from
-  the GDS_logs artifact rather than trusting the green tick.
-- Next after the wheel (Yamin's priorities): a car interior and dashboard
-  that look real, and curved roads.
+- The 1x2 design is on `main`: curves, traffic, crashes, score, interior,
+  sunset, steering wheel, road and cars twice as wide as the eye is high.
+- Tiny Tapeout build of 13112fa on 1x2: 85.5% core utilisation (core
+  107,931 um^2), worst slow-corner setup slack +0.32 ns, 0 setup and hold
+  violations, 4 routing passes, DRC/LVS/antenna clean. Before LibreLane:
+  80,641 um^2, 470 flip-flops.
+- **1x2 is full and timing has almost no margin.** Slack has moved by several
+  ns between near-identical layouts, so any RTL change, even a comment (it can
+  change generated cell names), may break timing. Do not change dev/rtl or
+  src/project.v without a reason worth a new layout round.
+- Vulkos has been asked whether 1x2 is allowed, with no reply as of 9 Nov. If
+  the answer is no, `main` must go back to `1x1-fallback` before the deadline.
+  The repository link must also have been emailed to Vulkos for the entry to
+  count.
+- Not built, for lack of room: softer two-layer mountains, bumper strip, round
+  vents, road-edge barrier, sun. The speed bar was removed to fit, so engine
+  pitch is the only speed cue.
 
 ## Yamin's machine
 
@@ -83,11 +82,11 @@ dev/               everything for developing the design (not built by Tiny Tapeo
 |---|---|
 | `make setup` | Fetch GF180 cell library into dev/pdk (once) |
 | `make model` | Render frames.png, drive.gif, engine.wav from the model |
-| `make units` | Unit tests: divider (all 255 rows), car_state (3,305 frames), audio (315,000 samples) |
-| `make chip` | Whole chip from dev/rtl, frames read from the VGA pins vs the model, 21 frames |
+| `make units` | Unit tests: divider (all 255 rows), car_state (11,805 frames), curve (36,720 rows), audio (315,000 samples) |
+| `make chip` | Whole chip from dev/rtl for both wheel versions, frames read from the VGA pins vs the model, about 51 frames each; takes several minutes |
 | `make project` | Regenerate src/project.v (renames the top to info.yaml's top_module) |
 | `make check` | src/project.v up to date, and the chip test passes on it |
-| `make area` | Cell area per block, flip-flops, % of a 1x1 tile |
+| `make area` | Cell area per block, flip-flops, % of a 1x1 tile (the 1x2 die is 112,783 um^2) |
 | `make sta` | Slow-corner (125 C, 3.0 V) setup estimate with OpenSTA |
 | `make gl` | Gate-level sim of the GF180 netlist vs RTL for 900,000 clocks |
 | `make all` | units, chip, project, check, area, sta, gl |
@@ -105,36 +104,56 @@ then `make` in test/.
 2. Change dev/rtl to match. Keep everything bit-exact with the model.
 3. `make units chip` must show 0 mismatches. Extend the tests to cover the
    new feature, including its extreme values.
-4. `make area sta`. Targets on a 1x1 tile: under about 60% before LibreLane,
-   worst pre-route slack +15 ns or more.
+4. `make area`, and `make sta` if OpenSTA is installed.
 5. `make project check gl`, then commit and push. Watch the GitHub Actions:
-   test, docs and gds (gds takes about 8 minutes) must all pass.
+   test, docs and gds (gds takes about 8 minutes) must all pass. CI going green
+   does NOT mean timing is met: read final/metrics.json from the GDS_logs
+   artifact (timing__setup__ws, timing__setup_vio__count,
+   design__instance__utilization). Worst paths are in
+   runs/wokwi/*-openroad-stapostpnr/max_ss_125C_3v00/max.rpt.
 
 Commit and push to main is fine: Yamin asked for direct edits.
 
-## The stage 1 design
+## The design
 
 - 640x480 at 60 Hz from 25 MHz: 800 clocks per line, 525 lines per frame.
   No framebuffer: each pixel's colour is computed as the beam scans.
-- Screen: sky rows 0-127 (mountains), horizon 128, road 129-383, dashboard
-  384-479 (speed bar). These boundaries make s_y = y - 128 = {~y[7], y[6:0]}
-  and every region test a bit slice of y.
+- Screen: sky rows 0-127 (sunset and mountains), horizon 128, road 129-351,
+  dashboard 352-479. s_y = y - 128 = {~y[7], y[6:0]}. The road logic runs to
+  row 383; the dashboard is drawn over its last rows.
 - Road row s_y shows distance z = 2^14 / s_y. A restoring divider makes one
   quotient bit per clock in horizontal blanking (starts x = 640, 15 clocks)
-  for the next line. Only z[3:0] is kept in stage 1 (parameter Z_BITS; curves
-  will need more).
-- Road half-width w = s_y. Centre: A = ((h - 320) << 6) + p * s_y, loaded at
-  the end of row 127 and built by adding p each line, so x - centre =
-  x + (A >>> 6), one adder per pixel. |x - c| uses bit inversion, not negation.
+  for the next line. 11 bits of z are kept.
+- Road half-width w = 2 s_y (a shift). A = ((h - 320) << 6) + (P >>> 5) * s_y,
+  17 bits, loaded on row 127 and built by adding P >>> 5 each line.
+- Curves: Ae = (A >>> 6) -/+ kappa z / 64, built in blanking with up to three
+  shifted adds (z ready x = 656, Ae loaded x = 658, adds x = 660-662), so
+  x - centre = x + Ae, one adder per pixel. z is clamped to 2047 for s_y < 9,
+  and when the road curves those rows are grass. Negative kappa's magnitude
+  is its bit inversion. kappa moves one step every 4 wraps of D towards the
+  value in the 16-segment track table (64 wraps per segment). |kappa| >= 4
+  pushes the heading outwards.
 - Stripes: bit 3 of z + (D >> 5); off for s_y < 32 to avoid shimmer.
-- Car state, once per frame, spread over 4 clocks after the frame pulse:
+- Car state, once per frame, stepped over 7 clocks after the frame pulse:
   speed v (0..192), wheel (-2..2, self-centring), heading h (pixels, held past
-  +/-96), sideways position P (p = P >>> 6, road edge |p| = 64, grass from 72,
-  held past 96), distance D (9 bits, wraps). Speed factor k = 0, 1, 2 so
-  products are shifts.
+  +/-96), sideways position P (p = P >>> 6, right lane p = 32, road edge
+  |p| = 64, grass from 72, held past 80), distance D (9 bits, wraps). Speed
+  factor k = 0, 1, 2 so products are shifts.
+- Traffic: 12-bit depths with 1 fraction bit, one shared adder. Slow car in
+  the right lane: +6 - v/16 per frame. Oncoming car on the left: -4 - v/16.
+  Below depth 0 a car respawns far ahead. Depth < 128 with p in that car's lane
+  is a crash: 63 frames stopped, red tint, noise, score reset. The score (BCD)
+  counts slow cars passed.
+- Cars are upright: on the last row with z >= the car's depth, Ae and s_y are
+  stored, and the next frame draws from them. The stored value is replaced
+  while scanning, so a car moving away loses its bottom row for that frame; the
+  model copies this. Rows s/2 to s, width s, window band, lamps, side panel.
+- Steering wheel: dev/rtl/steering_wheel.v, FULL = 1 (radius 128, centre
+  (320, 448)) is built; it takes two clocks, which moves it one pixel right.
+  WHEEL_FULL = 0 selects the small 1x1 version.
 - Audio: phase accumulator stepped once per line, step 128 + 2v (61-244 Hz),
-  sawtooth plus sub-octave square, LFSR noise off-road, PWM against x[7:0],
-  registered output on uio[0] (uio_oe = 1).
+  sawtooth plus sub-octave square, LFSR noise off-road and in a crash, PWM
+  against x[7:0], registered output on uio[0] (uio_oe = 1).
 - Pixel colour is a 2-stage pipeline; syncs are delayed one clock to match.
   The pins show pixel (x, y) two clocks after the counters were at (x, y).
 - Inputs ui[0..3] = left, right, accelerate, brake (two-flop synchroniser;
@@ -145,9 +164,14 @@ Commit and push to main is fine: Yamin asked for direct edits.
 - GF180 cells are big. A flip-flop is 64 um^2, a full adder 72 um^2. Each
   register bit costs about 100 um^2 once its enable mux and sync reset are
   counted. Cutting register bits saves far more than tidying arithmetic.
-- A 1x1 tile is 346.64 x 160.72 um (55,712 um^2). LibreLane adds about
-  10,000 um^2 (clock tree, timing repair buffers, tap cells). Stage 1 used
-  about 80% of the core after LibreLane and routed cleanly.
+- A 1x1 tile is 346.64 x 160.72 um (55,712 um^2); a 1x2 die is 112,783 um^2
+  with a 107,931 um^2 core. LibreLane adds about 11,600 um^2 at this size.
+  About 85% utilisation is the practical ceiling.
+- Multiplying by a power of two is wiring and free; x1.5 needs an adder at every
+  use. Going from a 1.5x road to 2x saved 4,900 um^2.
+- Hand estimates of area have run up to 2x low. Measure, and let the layout
+  decide. `make area` counts logic shared between modules twice; the real flow
+  flattens and merges it.
 - Timing is checked at the slow corner (125 C, 3.0 V), where gates are about
   2x slower than typical. Routing made paths about 1.5x slower than the
   pre-route OpenSTA estimate. Inputs and outputs have 8 ns external delay
@@ -157,31 +181,14 @@ Commit and push to main is fine: Yamin asked for direct edits.
   reset input; register anything once-per-frame logic reads; split long
   per-pixel logic into pipeline stages and delay the syncs to match; register
   output pins.
+- Synthesis merges identical registers, so a "copy" to cut fan-out vanishes.
+  Chain the copies, or store one inverted.
+- A copy of y is one clock late, so it is only safe for logic that never draws
+  column 0.
+- `inside` is a SystemVerilog keyword; it broke the compile of src/project.v.
 - Verilog `default_nettype none` carries over into later files: in gate-level
   sims, compile the cell models first.
 - Never put spaces in file names (a "project 1.2.v" broke every CI check).
 - src/config.json in this repo is Tiny Tapeout's, separate from Vulkos'
   local LibreLane config. Regenerating the config in Vulkos resets
   CLOCK_PERIOD to 20; it must be 40.
-
-## Stage 2 plan (agreed priorities)
-
-1. **Steering wheel in the foreground** (Yamin: a must). The wheel angle has
-   only 5 values, so no trigonometry: octagonal rim from max(|dx|, |dy|) and
-   |dx| + |dy|, a spoke tilted with slope wheel/4 (a shift), a marker on the
-   top of the rim that slides with the angle. Estimated 3,500 um^2.
-2. **Curved roads.** Keep more bits of z (Z_BITS), curvature per track
-   segment from a hash of the segment index, per-line offset (1/2) kappa f z
-   folded into the per-line centre so the pixel path stays one adder;
-   curvature also pushes the heading. Estimated 6,000 um^2. A cheaper
-   fallback is Out Run-style per-row offsets without depth.
-3. Traffic only if there is room.
-
-Area budget: stage 1 is about 32,850 um^2 before LibreLane (59% of 1x1)
-and about 80% of the 1x1 core after it; routing needed 4 passes at that
-level, so treat about 85% as the 1x1 ceiling. A 1x2 tile roughly doubles the
-core area.
-
-Stage 1 plus both would not fit 1x1. Plan: move to a 1x2 tile (set
-`tiles: "1x2"` in info.yaml; size can change on a later push). Yamin is
-asking Vulkos whether 1x2 is allowed; the current 1x1 build is the fallback.
