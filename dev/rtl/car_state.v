@@ -36,7 +36,7 @@ module car_state (
     output reg         [3:0]  tens,
     output reg         [3:0]  ones
 );
-    localparam [7:0] V_MAX = 8'd192;
+    localparam [7:0] V_MAX = 8'd224;
 
     reg signed [13:0] P;
     reg        [2:0]  n;          // frame counter for coasting drag
@@ -52,7 +52,7 @@ module car_state (
     reg signed [3:0] d;
     always @(*) begin
         if (offroad && v > 8'd96) d = brake ? -4'sd4 : -4'sd2;   // grass drag
-        else if (accel)           d = (v == V_MAX) ? 4'sd0 : 4'sd1;
+        else if (accel)           d = (v == V_MAX) ? 4'sd0 : (v[7] ? 4'sd1 : 4'sd2);
         else if (brake)           d = -4'sd4;
         else if (n == 3'd0)       d = -4'sd1;
         else                      d = 4'sd0;
@@ -147,7 +147,7 @@ module car_state (
     // heading: h + wheel*k, held once it passes +/-96
     wire signed [7:0] w8  = {{5{wheel[2]}}, wheel};
     // a hard bend, |kappa| >= 4, pushes the heading outwards
-    wire              push  = kappa[2] ^ kappa[3];
+    wire              push  = (kappa[2] ^ kappa[3]) & (wheel == 3'sd0);   // not while steering
     wire signed [7:0] steer = !push ? w8 : kappa[3] ? w8 + 8'sd1 : w8 - 8'sd1;
     wire signed [7:0] dh  = k2 ? (steer <<< 1) : (k1 ? steer : 8'sd0);
     wire              h_stop = at_limit(h[7:5], steer[7], (steer == 8'sd0) || !(k1 || k2));

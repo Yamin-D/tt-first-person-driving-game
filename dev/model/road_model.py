@@ -22,7 +22,7 @@ C_SHIFT  = 14           # fH = 2**14, so z = 2**14 // s_y, s_y = 1..255
 STRIPE_BIT = 3          # band half-period = 8 units of road
 D_SHIFT  = 5            # stripes use D >> 5 (4 bits)
 FOG_SY   = 32           # no stripes for s_y < 32 (s_y[7:5] == 0)
-V_MAX    = 192
+V_MAX    = 224
 WHEEL_FULL = True       # False: small wheel for 1x1, True: full wheel for 1x2
 ROAD_EDGE, KERB_EDGE = 64, 72   # |p| thresholds (W/H = 1, kerb is w/8)
 
@@ -123,7 +123,7 @@ class Car:
             return
         v = self.v
         if self.offroad() and v > 96:  d = -4 if brake else -2   # grass drag
-        elif accel:        d = 0 if v == V_MAX else 1
+        elif accel:        d = 0 if v == V_MAX else (2 if v < 128 else 1)
         elif brake:        d = -4
         elif self.n == 0:  d = -1
         else:              d = 0
@@ -136,7 +136,7 @@ class Car:
         k = 2 if v >= 128 else (1 if v >= 64 else 0)   # speed factor: a shift
         # a hard bend (|kappa| >= 4) pushes the heading outwards
         mag = ~self.kappa if self.kappa < 0 else self.kappa
-        push = 0 if mag < 4 else (1 if self.kappa < 0 else -1)
+        push = 0 if mag < 4 or self.wheel != 0 else (1 if self.kappa < 0 else -1)   # not while steering
         dh = (self.wheel + push) * k
         if not at_limit(self.h, dh):
             self.h += dh
@@ -420,7 +420,7 @@ def engine_audio(speeds, offroads):
     phase, lfsr = 0, 0x7FFF
     out = []
     for v, off in zip(speeds, offroads):
-        inc = 128 + (v << 1)               # 61 Hz idle to 244 Hz at top speed
+        inc = (v + 32) << 2                # 61 Hz idle to 488 Hz at top speed
         for _ in range(525):
             phase = (phase + inc) & 0x1FFFF
             fb = ((lfsr >> 14) ^ (lfsr >> 13)) & 1
@@ -428,6 +428,8 @@ def engine_audio(speeds, offroads):
             s = ((phase >> 9) & 0x7F) + (64 if (phase >> 16) & 1 else 0)
             if off:
                 s ^= lfsr & 0x3F
+            elif (phase >> 15) & 1:            # rough: noise on half of each cycle
+                s ^= lfsr & 0x0F
             out.append(s & 0xFF)
     return np.array(out, np.uint8)
 

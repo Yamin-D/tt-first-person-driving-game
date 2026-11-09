@@ -215,7 +215,7 @@ module car_state (
     output reg         [3:0]  tens,
     output reg         [3:0]  ones
 );
-    localparam [7:0] V_MAX = 8'd192;
+    localparam [7:0] V_MAX = 8'd224;
 
     reg signed [13:0] P;
     reg        [2:0]  n;          // frame counter for coasting drag
@@ -231,7 +231,7 @@ module car_state (
     reg signed [3:0] d;
     always @(*) begin
         if (offroad && v > 8'd96) d = brake ? -4'sd4 : -4'sd2;   // grass drag
-        else if (accel)           d = (v == V_MAX) ? 4'sd0 : 4'sd1;
+        else if (accel)           d = (v == V_MAX) ? 4'sd0 : (v[7] ? 4'sd1 : 4'sd2);
         else if (brake)           d = -4'sd4;
         else if (n == 3'd0)       d = -4'sd1;
         else                      d = 4'sd0;
@@ -326,7 +326,7 @@ module car_state (
     // heading: h + wheel*k, held once it passes +/-96
     wire signed [7:0] w8  = {{5{wheel[2]}}, wheel};
     // a hard bend, |kappa| >= 4, pushes the heading outwards
-    wire              push  = kappa[2] ^ kappa[3];
+    wire              push  = (kappa[2] ^ kappa[3]) & (wheel == 3'sd0);   // not while steering
     wire signed [7:0] steer = !push ? w8 : kappa[3] ? w8 + 8'sd1 : w8 - 8'sd1;
     wire signed [7:0] dh  = k2 ? (steer <<< 1) : (k1 ? steer : 8'sd0);
     wire              h_stop = at_limit(h[7:5], steer[7], (steer == 8'sd0) || !(k1 || k2));
@@ -1085,9 +1085,10 @@ endmodule
 // engine_audio.v
 // ==========================================================================
 // Engine sound. A phase accumulator steps once per line (31.25 kHz) with a step
-// that rises with speed: inc = 128 + 2v gives about 61 Hz idling, 244 Hz at top
-// speed. 128 + 2v = (v + 64) << 1, so it needs only a 2-bit increment. The sample is a sawtooth plus a square an octave below. Off the road,
-// LFSR noise is mixed in for a gravel rumble. The output pin is PWM: high
+// that rises with speed: inc = (v + 32) << 2 gives about 61 Hz idling, 488 Hz at
+// top speed. The sample is a sawtooth plus a square an octave below, roughened by
+// a little LFSR noise on half of each cycle. Off the road, more noise is mixed in
+// for a gravel rumble. The output pin is PWM: high
 // while the low 8 bits of the VGA x counter are below the sample, which gives
 // a 98 kHz carrier with no counter of its own.
 
@@ -1104,21 +1105,22 @@ module engine_audio (
     reg [16:0] phase;
     reg [14:0] lfsr;
 
-    wire [8:0] v64 = {1'b0, v} + 9'd64;
-    wire [9:0] inc = {v64, 1'b0};
+    wire [8:0] v32 = {1'b0, v} + 9'd32;
+    wire [10:0] inc = {v32, 2'b00};
 
     always @(posedge clk) begin
         if (!rst_n) begin
             phase <= 17'd0;
             lfsr  <= 15'h7FFF;
         end else if (tick) begin
-            phase <= phase + {7'd0, inc};
+            phase <= phase + {6'd0, inc};
             lfsr  <= {lfsr[13:0], lfsr[14] ^ lfsr[13]};
         end
     end
 
     wire [7:0] base = {1'b0, phase[15:9]} + (phase[16] ? 8'd64 : 8'd0);
-    assign sample = offroad ? (base ^ {2'b00, lfsr[5:0]}) : base;
+    assign sample = offroad ? (base ^ {2'b00, lfsr[5:0]}) :
+                    (base ^ {4'd0, lfsr[3:0] & {4{phase[15]}}});
 
     // registered, so the pin is driven straight from a flip-flop
     always @(posedge clk)
