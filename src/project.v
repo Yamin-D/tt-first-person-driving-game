@@ -15,7 +15,7 @@
  * Rename the module to tt_um_<your GitHub username>_... before pushing.
  */
 
-module tt_um_yamin_d_first_person_driving_game #(
+module tt_um_yamin_d_first_person_driving_game_1x1 #(
     parameter WHEEL_FULL = 0        // 0: small wheel for 1x1, 1: full wheel for 1x2
 ) (
     input  wire [7:0] ui_in,
