@@ -10,7 +10,7 @@ module tb_divider;
     integer s, k;
 
     line_setup #(.Z_BITS(15)) dut (.clk(clk), .rst_n(rst_n), .x(x), .y(y), .h(8'sd0),
-                    .p(8'sd0), .kappa(4'sd0), .z(z), .Ae(Ae));
+                    .p(9'sd0), .kappa(4'sd0), .z(z), .Ae(Ae));
 
     always #20 clk = ~clk;
 

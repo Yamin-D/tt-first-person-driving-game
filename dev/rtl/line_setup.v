@@ -18,7 +18,7 @@ module line_setup #(
     input  wire        [9:0]  x,
     input  wire        [9:0]  y,
     input  wire signed [7:0]  h,
-    input  wire signed [7:0]  p,
+    input  wire signed [8:0]  p,           // position, counted double: P >>> 5
     input  wire signed [3:0]  kappa,
     output wire [Z_BITS-1:0]  z,
     output reg  signed [10:0] Ae,
@@ -90,7 +90,7 @@ module line_setup #(
         if (a_load)
             A <= {h_off, 6'b000000};
         else if (a_add)
-            A <= A + {{9{p[7]}}, p};
+            A <= A + {{8{p[8]}}, p};
     end
 
     // ---- curve: Ae = (A >>> 6) -/+ (kappa * z >> 6), one shifted add per clock.

@@ -79,15 +79,11 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire dash = y_q[8] & (y_q[7] | (y_q[6] & y_q[5]));// y >= 352
     wire [7:0] s_y = {~y_q[7], y_q[6:0]};             // y - 128, valid on road rows
     wire [7:0] s_now = {~y[7], y[6:0]};               // the same one clock sooner
-    // the road's half-width is 1.5 s_y
-    wire [8:0] w_now = {1'b0, s_now} + {2'b00, s_now[7:1]};
-    reg  [8:0] road_w_q;
-    always @(posedge clk)
-        road_w_q <= w_now;
+    wire [8:0] road_w = {s_y, 1'b0};                  // twice s_y
 
     // ---- road geometry for this line (w = s_y)
-    wire [9:0] kerb_w = {1'b0, road_w_q} + {4'b0000, road_w_q[8:3]};
-    wire [4:0] dash_w = {1'b0, road_w_q[8:5]} + 5'd1;
+    wire [9:0] kerb_w = {1'b0, road_w} + {4'b0000, road_w[8:3]};
+    wire [4:0] dash_w = {1'b0, road_w[8:5]} + 5'd1;
 
     wire signed [10:0] dx = $signed({1'b0, x}) + Ae;    // x - centre
     wire        [9:0]  d  = dx[10] ? ~dx[9:0] : dx[9:0]; // |dx|, or |dx| - 1 when negative
@@ -145,11 +141,9 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     // adder: the slow car (right of its reference) is x + Ae - s/4, and the
     // oncoming car is ~(x + Ae + s/4). Both constants change only at the base row.
     reg signed [10:0] k_slow, k_onc;
-    wire [8:0] big_slow = {1'b0, s_slow} + {2'b00, s_slow[7:1]};
-    wire [8:0] big_onc  = {1'b0, s_onc}  + {2'b00, s_onc[7:1]};
     always @(posedge clk) begin
-        k_slow <= ae_slow - $signed({4'b0000, big_slow[8:2]});
-        k_onc  <= ae_onc  + $signed({4'b0000, big_onc[8:2]});
+        k_slow <= ae_slow - $signed({4'b0000, s_slow[7:1]});
+        k_onc  <= ae_onc  + $signed({4'b0000, s_onc[7:1]});
     end
     wire [10:0] u_slow =   $signed({1'b0, x}) + k_slow;
     wire [10:0] u_onc  = ~($signed({1'b0, x}) + k_onc);
@@ -162,10 +156,10 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         rows_onc_q  <= (s_now >= {1'b0, s_onc[7:1]})  && (s_now <= s_onc);
         win_slow_q  <= ({1'b0, s_now} < {2'b00, s_slow[7:1]} + {4'b0000, s_slow[7:3]});
         win_onc_q   <= ({1'b0, s_now} < {2'b00, s_onc[7:1]}  + {3'b000, s_onc[7:2]});
-        col_b_q     <= {1'b0, w_now[8:1]} + {2'b00, w_now[8:2]};
+        col_b_q     <= {1'b0, s_now} + {2'b00, s_now[7:1]};
     end
 
-    wire [7:0] col_a  = {1'b0, road_w_q[8:2]};
+    wire [7:0] col_a  = {1'b0, s_y[7:1]};
 
     // ---- score, on the dashboard
     wire [1:0] score_code;
@@ -260,7 +254,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
             rgb = SLOW_SIDE;
         else if (stripe && d_q < {5'd0, dash_w})
             rgb = LINE_COL;
-        else if (d_q < {1'b0, road_w_q})
+        else if (d_q < {1'b0, road_w})
             rgb = stripe ? TARMAC1 : TARMAC0;
         else if (d_q < kerb_w)
             rgb = stripe ? KERB1 : KERB0;

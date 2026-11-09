@@ -24,7 +24,7 @@ D_SHIFT  = 5            # stripes use D >> 5 (4 bits)
 FOG_SY   = 32           # no stripes for s_y < 32 (s_y[7:5] == 0)
 V_MAX    = 192
 WHEEL_FULL = True       # False: small wheel for 1x1, True: full wheel for 1x2
-ROAD_EDGE, KERB_EDGE = 96, 108   # |p| thresholds (W/H = 1, kerb is w/8)
+ROAD_EDGE, KERB_EDGE = 64, 72   # |p| thresholds (W/H = 1, kerb is w/8)
 
 # curvature wanted in each of the 16 track segments (64 distance wraps each).
 # kappa is 4 bits; a negative value's magnitude is its bit inversion, so 5 and
@@ -33,7 +33,7 @@ TRACK = [0, 0, 5, 5, 0, -6, -6, 0, 7, -8, 0, -5, -5, 6, 0, 0]
 Z_SAT_SY = 9            # rows with s_y below this use z = 2047
 
 # traffic. Depths are 12 bits with 1 fraction bit: Z >> 1 compares with row depth z.
-LANE_P     = 48         # sideways position of the right lane's centre
+LANE_P     = 32         # sideways position of the right lane's centre
 SLOW_STEP  = 6          # per frame, added to the slow car's depth
 ONC_STEP   = -4        # per frame, added to the oncoming car's depth
 FAR_HOLD   = 4032      # the slow car stops drawing away at this depth
@@ -79,7 +79,7 @@ def serial_recip(s_y):
 P_FRAC = 6             # fraction bits on the sideways position
 
 LIMIT = 96             # |h| stops growing outwards beyond this
-P_LIMIT = 120          # and |p| beyond this
+P_LIMIT = 80           # and |p| beyond this
 
 def at_limit(value, step, limit=LIMIT):
     """True if adding `step` would push `value` further past +/-96. The
@@ -176,7 +176,7 @@ class Car:
                 self.ones = 0
                 self.tens = (self.tens + 1) % 10
         p = self.p
-        hit = (self.slow < NEAR_Z and 0 <= p < 96) or (self.onc < NEAR_Z and -96 <= p < 0)
+        hit = (self.slow < NEAR_Z and 0 <= p < 64) or (self.onc < NEAR_Z and -64 <= p < 0)
         if hit:
             self.crash = CRASH_FRAMES
             self.v = self.wheel = self.h = 0
@@ -195,6 +195,7 @@ def line_centre(A, z, s_y, kappa):
     """The per-line value Ae with x - centre = x + Ae: A >> 6 plus the curve
     offset kappa * z / 64, built as the hardware does with up to three shifted
     adds in horizontal blanking. Each is one's complement when kappa >= 0."""
+    A = ((A + 65536) & 131071) - 65536      # A is 17 bits
     Ae = wrap11(A >> 6)
     zs = 2047 if s_y < Z_SAT_SY else z & 0x7FF
     mag = (~kappa if kappa < 0 else kappa) & 7
@@ -259,7 +260,7 @@ def base_row(car, Z):
     zc, found = Z >> 1, None
     for s in range(1, 255):
         if row_depth(s) >= zc and row_depth(s + 1) < zc:
-            A = ((car.h - 320) << 6) + car.p * s
+            A = ((car.h - 320) << 6) + (car.P >> 5) * s
             found = (line_centre(A, RECIP[s], s, car.kappa), s)
     return found
 
@@ -268,7 +269,7 @@ def draw_cars(row, d, left, s_y, car, now):
     The side panel lies beyond the rear face and stops at the road's ground line
     for that row, so it vanishes when the car is straight ahead."""
     x = np.arange(W_SCREEN)
-    Sy = s_y + (s_y >> 1)
+    Sy = s_y << 1
     a_row, b_row = Sy >> 2, (Sy >> 1) + (Sy >> 2)
     for (Ae, s), base, is_left, body, lamp, flank, glass in (
             (car.cap_slow, now[0], False, SLOW_BODY, SLOW_LAMP, SLOW_SIDE, SLOW_GLASS),
@@ -282,7 +283,7 @@ def draw_cars(row, d, left, s_y, car, now):
         da = np.where(dc < 0, ~dc, dc) & 1023
         lane = (dc < 0) if is_left else (dc >= 0)
         road_side = left if is_left else ~left
-        S = s + (s >> 1)
+        S = s << 1
         a, b, w = S >> 2, (S >> 1) + (S >> 2), S >> 3
         inner = lane & road_side & (da >= a - w) & (da < a) & (d >= a_row)
         outer = lane & road_side & (da >= b) & (da < b + w) & (d < b_row)
@@ -372,7 +373,7 @@ def render(car):
                 img[y] = GRASS[0]
             else:
                 z = serial_recip(s_y)      # computed in previous line's hblank
-                w = s_y + (s_y >> 1)       # the road is 1.5 x wider than the eye is high
+                w = s_y << 1               # the road is twice as wide as the eye is high
                 kerb_w = w + (w >> 3)
                 dash_w = (w >> 5) + 1
                 dx = x + line_centre(A, z, s_y, car.kappa)   # x - centre, one adder
@@ -389,7 +390,7 @@ def render(car):
         if y == HORIZON - 1:
             A = (car.h - 320) << 6         # centre offset folded into A
         elif HORIZON <= y < DASH_TOP:
-            A += car.p
+            A += car.P >> 5                # each unit of p counts double on screen
     inner = interior_code()
     tint = (img >> 1) & 0b01_01_01          # each channel halved
     img[inner == 6] = tint[inner == 6]

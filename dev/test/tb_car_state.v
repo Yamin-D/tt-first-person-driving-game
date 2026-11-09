@@ -20,7 +20,7 @@ module tb_car_state;
 
     car_state dut (.clk(clk), .rst_n(rst_n), .frame(frame),
                    .left(left), .right(right), .accel(accel), .brake(brake),
-                   .v(v), .wheel(wheel), .h(h), .p(p), .D(D), .offroad(offroad), .kappa(kappa),
+                   .v(v), .wheel(wheel), .h(h), .p(p), .p2(), .D(D), .offroad(offroad), .kappa(kappa),
                    .slow(slow), .onc(onc), .tens(tens), .ones(ones));
 
     always #20 clk = ~clk;

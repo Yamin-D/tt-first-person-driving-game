@@ -46,6 +46,7 @@ module tt_um_road_racer #(
     wire signed [2:0] wheel;
     wire signed [7:0] h;
     wire signed [7:0] p;
+    wire signed [8:0] p2;
     wire        [8:0] D;
     wire              offroad;
     wire signed [3:0] kappa;
@@ -56,7 +57,7 @@ module tt_um_road_racer #(
     car_state car (
         .clk(clk), .rst_n(rst_q), .frame(frame),
         .left(btn[0]), .right(btn[1]), .accel(btn[2]), .brake(btn[3]),
-        .v(v), .wheel(wheel), .h(h), .p(p), .D(D), .offroad(offroad), .kappa(kappa),
+        .v(v), .wheel(wheel), .h(h), .p(p), .p2(p2), .D(D), .offroad(offroad), .kappa(kappa),
         .slow(slow), .onc(onc), .clr_slow(clr_slow), .clr_onc(clr_onc), .flash(flash),
         .tens(tens), .ones(ones)
     );
@@ -67,7 +68,7 @@ module tt_um_road_racer #(
     wire        [10:0] zs;
     wire               z_latch;
     line_setup #(.Z_BITS(11)) line (
-        .clk(clk), .rst_n(rst_q), .x(x), .y(y), .h(h), .p(p),
+        .clk(clk), .rst_n(rst_q), .x(x), .y(y), .h(h), .p(p2),
         .kappa(kappa), .z(z), .Ae(Ae), .zs(zs), .latch(z_latch)
     );
 
@@ -104,5 +105,5 @@ module tt_um_road_racer #(
     assign uio_out = {7'b0000000, audio};
     assign uio_oe  = 8'b0000_0001;
 
-    wire _unused = &{ena, uio_in, ui_in[7:4], D[4:0], z[10:4], slow[0], onc[0], frame, sample, 1'b0};
+    wire _unused = &{p, ena, uio_in, ui_in[7:4], D[4:0], z[10:4], slow[0], onc[0], frame, sample, 1'b0};
 endmodule

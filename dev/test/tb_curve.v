@@ -6,7 +6,8 @@
 module tb_curve;
     reg clk = 0, rst_n = 0;
     reg [9:0] x = 0, y = 0;
-    reg signed [7:0] h = 0, p = 0;
+    reg signed [7:0] h = 0;
+    reg signed [8:0] p = 0;
     reg signed [3:0] kappa = 0;
     wire [10:0] z;
     wire signed [10:0] Ae;
@@ -17,7 +18,7 @@ module tb_curve;
 
     always #20 clk = ~clk;
 
-    function signed [7:0] pick(input integer i, input integer lo, input integer hi);
+    function signed [8:0] pick(input integer i, input integer lo, input integer hi);
         pick = (i == 0) ? lo : (i == 1) ? 0 : hi;
     endfunction
 
@@ -28,7 +29,7 @@ module tb_curve;
         for (ip = 0; ip < 3; ip = ip + 1)
         for (ik = -8; ik < 8; ik = ik + 1) begin
             h = pick(ih, -101, 101);
-            p = pick(ip, -121, 120);
+            p = pick(ip, -162, 161);
             kappa = ik;
             for (row = 127; row <= 382; row = row + 1) begin
                 y = row;
