@@ -297,14 +297,12 @@ def draw_cars(row, d, left, s_y, car, now):
         else:
             row[face & outside] = lamp
 
-def score_code(tens, ones, v):
-    """0 none, 1 panel, 2 lit segment, rows 384-447: the score at columns 128-191
-    and a speed bar, v/4 rows tall, in the panel at columns 32-95."""
+def score_code(tens, ones):
+    """0 none, 1 panel, 2 lit segment, rows 384-447: the score at columns 128-191."""
     y_, x_ = np.mgrid[0:H_SCREEN, 0:W_SCREEN]
     rows = (y_ >= 384) & (y_ < 448)
     right = (x_ >= 128) & (x_ < 192) & rows
-    left = (x_ >= 32) & (x_ < 96) & rows
-    panel = right | left
+    panel = right
     cx, cy = (x_ >> 2) & 7, (y_ >> 3) & 7
     mid = (cx >= 1) & (cx <= 5)
     upper, lower = (cy >= 1) & (cy <= 3), (cy >= 5) & (cy <= 6)
@@ -317,7 +315,6 @@ def score_code(tens, ones, v):
     code = np.zeros_like(x_)
     code[panel] = 1
     code[panel & lit] = 2
-    code[left & (x_ >= 48) & (x_ < 80) & (447 - y_ < v >> 2)] = 2
     return code
 
 # ---------------------------------------------------------------- interior
@@ -399,7 +396,7 @@ def render(car):
     img[inner == 3] = COCKPIT
     img[inner == 4] = PANEL_COL
     img[inner == 5] = VENT_COL
-    score = score_code(car.tens, car.ones, car.v)
+    score = score_code(car.tens, car.ones)
     img[score == 1] = PANEL_COL
     img[score == 2] = BAR_COL
     code = wheel_code(car.wheel, WHEEL_FULL)

@@ -55,8 +55,8 @@ frame against it from the VGA pins.
 2. Set the clock to 25 MHz (25.175 MHz is the ideal VGA value; both work).
 3. Hold rst_n low for a few clocks, then release it.
 4. Inputs (active high): ui[0] steer left, ui[1] steer right, ui[2] accelerate,
-   ui[3] brake. On the dashboard, the left number is your speed and the right number is
-   your score, the cars overtaken.
+   ui[3] brake. The number on the dashboard is your score, the cars overtaken. The engine
+   note rises with your speed.
 
 ## External hardware
 

@@ -20,7 +20,6 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     input  wire signed [7:0]  h,       // heading in pixels
     input  wire        [3:0]  d_hi,    // distance >> 5
     input  wire signed [2:0]  wheel,   // wheel angle, -2..2
-    input  wire        [7:0]  v,       // speed, for the digits
     input  wire        [10:0] zs,      // next row's depth (with latch)
     input  wire               latch,
     input  wire        [10:0] zc_slow, // depth of each car
@@ -165,7 +164,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
 
     // ---- score, on the dashboard
     wire [1:0] score_code;
-    score_display score (.clk(clk), .v(v), .x(x), .y(y_w), .tens(tens), .ones(ones), .code(score_code));
+    score_display score (.clk(clk), .x(x), .y(y_w), .tens(tens), .ones(ones), .code(score_code));
 
     // ---- static interior
     wire [2:0] inner_code;
@@ -213,15 +212,19 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire [1:0] slow_kind;       // 0 none, 1 body, 3 lamp
     wire [1:0] onc_kind;
     wire       slow_side, onc_side;
-    reg  [7:0] h_w_slow, h_w_onc;             // registered: this was the slowest path
+    // A dedicated copy of each car's size for the shape logic. The sizes only
+    // change at the base row, and the originals are heavily loaded.
+    reg  [7:0] s_slow_d, s_onc_d;
     always @(posedge clk) begin
-        h_w_slow <= s_slow - {3'b000, s_slow[7:3]};
-        h_w_onc  <= s_onc  - {3'b000, s_onc[7:3]};
+        s_slow_d <= s_slow;
+        s_onc_d  <= s_onc;
     end
-    car_shape shape_slow (.s(s_slow), .h_w(h_w_slow), .rows(rows_slow_q), .window(win_slow_q), .u(u_slow_q),
+    wire [7:0] h_w_slow = s_slow_d - {3'b000, s_slow_d[7:3]};
+    wire [7:0] h_w_onc  = s_onc_d  - {3'b000, s_onc_d[7:3]};
+    car_shape shape_slow (.s(s_slow_d), .h_w(h_w_slow), .rows(rows_slow_q), .window(win_slow_q), .u(u_slow_q),
                           .road_side(~left_q), .d(d_q), .col_a(col_a), .col_b(col_b_q),
                           .kind(slow_kind), .side(slow_side));
-    car_shape shape_onc  (.s(s_onc), .h_w(h_w_onc), .rows(rows_onc_q), .window(win_onc_q), .u(u_onc_q),
+    car_shape shape_onc  (.s(s_onc_d), .h_w(h_w_onc), .rows(rows_onc_q), .window(win_onc_q), .u(u_onc_q),
                           .road_side(left_q), .d(d_q), .col_a(col_a), .col_b(col_b_q),
                           .kind(onc_kind), .side(onc_side));
     always @(*) begin

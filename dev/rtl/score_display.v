@@ -1,11 +1,10 @@
-// The dashboard readouts, rows 384-447: the score as two seven-segment digits at
-// columns 128-191, and a speed bar in the panel at columns 32-95. Each digit is a 32 x 64 cell of 4 x 8 pixel blocks, cx 0-7 and cy 0-7.
+// The score on the dashboard: two seven-segment digits at columns 128-191, rows
+// 384-447. Each digit is a 32 x 64 cell of 4 x 8 pixel blocks, cx 0-7 and cy 0-7.
 // code: 0 none, 1 panel, 2 lit segment.
 `default_nettype none
 
 module score_display (
     input  wire       clk,
-    input  wire [7:0] v,
     input  wire [9:0] x,
     input  wire [9:0] y,
     input  wire [3:0] tens,
@@ -13,12 +12,9 @@ module score_display (
     output wire [1:0] code
 );
     wire       right = (x[9:6] == 4'b0010);
-    wire       left  = (x[9:5] == 5'b00001) | (x[9:5] == 5'b00010);
-    wire       panel = (right | left) & (y[8:6] == 3'b110);
+    wire       panel = right & (y[8:6] == 3'b110);
     wire [2:0] cx    = x[4:2];
     wire [2:0] cy    = y[5:3];
-    // the speed bar: v / 4 rows up from the panel's bottom row, in columns 48-79
-    wire       bar   = left & ((x[9:4] == 6'd3) | (x[9:4] == 6'd4)) & (~y[5:0] < v[7:2]);
     // Which digit is next is worked out one column ahead and registered, which
     // takes the digit choice off the path from x through the segment decoder.
     wire       next5 = x[5] ^ (&x[4:0]);
@@ -50,6 +46,5 @@ module score_display (
                (seg[4] & (cx == 3'd0) & lower) | (seg[5] & (cx == 3'd0) & upper) |
                (seg[6] & mid & (cy == 3'd4));
 
-    assign code = !panel ? 2'd0 : ((right & lit) | bar) ? 2'd2 : 2'd1;
-    wire _unused = &{v[1:0], 1'b0};
+    assign code = !panel ? 2'd0 : lit ? 2'd2 : 2'd1;
 endmodule

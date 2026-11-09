@@ -81,7 +81,7 @@ module tt_um_yamin_d_first_person_driving_game #(
     wire [5:0] rgb;
     pixel_colour #(.WHEEL_FULL(WHEEL_FULL)) pix (
         .clk(clk), .rst_n(rst_q), .x(x), .y(y), .active(active), .z(z[3:0]), .Ae(Ae), .h(h),
-        .d_hi(D[8:5]), .wheel(wheel), .v(v), .zs(zs), .latch(z_latch),
+        .d_hi(D[8:5]), .wheel(wheel), .zs(zs), .latch(z_latch),
         .zc_slow(slow[11:1]), .zc_onc(onc[11:1]), .clr_slow(clr_slow), .clr_onc(clr_onc),
         .flash(flash), .kappa(kappa), .tens(tens), .ones(ones), .rgb(rgb)
     );
@@ -594,7 +594,6 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     input  wire signed [7:0]  h,       // heading in pixels
     input  wire        [3:0]  d_hi,    // distance >> 5
     input  wire signed [2:0]  wheel,   // wheel angle, -2..2
-    input  wire        [7:0]  v,       // speed, for the digits
     input  wire        [10:0] zs,      // next row's depth (with latch)
     input  wire               latch,
     input  wire        [10:0] zc_slow, // depth of each car
@@ -739,7 +738,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
 
     // ---- score, on the dashboard
     wire [1:0] score_code;
-    score_display score (.clk(clk), .v(v), .x(x), .y(y_w), .tens(tens), .ones(ones), .code(score_code));
+    score_display score (.clk(clk), .x(x), .y(y_w), .tens(tens), .ones(ones), .code(score_code));
 
     // ---- static interior
     wire [2:0] inner_code;
@@ -787,15 +786,19 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire [1:0] slow_kind;       // 0 none, 1 body, 3 lamp
     wire [1:0] onc_kind;
     wire       slow_side, onc_side;
-    reg  [7:0] h_w_slow, h_w_onc;             // registered: this was the slowest path
+    // A dedicated copy of each car's size for the shape logic. The sizes only
+    // change at the base row, and the originals are heavily loaded.
+    reg  [7:0] s_slow_d, s_onc_d;
     always @(posedge clk) begin
-        h_w_slow <= s_slow - {3'b000, s_slow[7:3]};
-        h_w_onc  <= s_onc  - {3'b000, s_onc[7:3]};
+        s_slow_d <= s_slow;
+        s_onc_d  <= s_onc;
     end
-    car_shape shape_slow (.s(s_slow), .h_w(h_w_slow), .rows(rows_slow_q), .window(win_slow_q), .u(u_slow_q),
+    wire [7:0] h_w_slow = s_slow_d - {3'b000, s_slow_d[7:3]};
+    wire [7:0] h_w_onc  = s_onc_d  - {3'b000, s_onc_d[7:3]};
+    car_shape shape_slow (.s(s_slow_d), .h_w(h_w_slow), .rows(rows_slow_q), .window(win_slow_q), .u(u_slow_q),
                           .road_side(~left_q), .d(d_q), .col_a(col_a), .col_b(col_b_q),
                           .kind(slow_kind), .side(slow_side));
-    car_shape shape_onc  (.s(s_onc), .h_w(h_w_onc), .rows(rows_onc_q), .window(win_onc_q), .u(u_onc_q),
+    car_shape shape_onc  (.s(s_onc_d), .h_w(h_w_onc), .rows(rows_onc_q), .window(win_onc_q), .u(u_onc_q),
                           .road_side(left_q), .d(d_q), .col_a(col_a), .col_b(col_b_q),
                           .kind(onc_kind), .side(onc_side));
     always @(*) begin
@@ -984,13 +987,12 @@ endmodule
 // ==========================================================================
 // score_display.v
 // ==========================================================================
-// The dashboard readouts, rows 384-447: the score as two seven-segment digits at
-// columns 128-191, and a speed bar in the panel at columns 32-95. Each digit is a 32 x 64 cell of 4 x 8 pixel blocks, cx 0-7 and cy 0-7.
+// The score on the dashboard: two seven-segment digits at columns 128-191, rows
+// 384-447. Each digit is a 32 x 64 cell of 4 x 8 pixel blocks, cx 0-7 and cy 0-7.
 // code: 0 none, 1 panel, 2 lit segment.
 
 module score_display (
     input  wire       clk,
-    input  wire [7:0] v,
     input  wire [9:0] x,
     input  wire [9:0] y,
     input  wire [3:0] tens,
@@ -998,12 +1000,9 @@ module score_display (
     output wire [1:0] code
 );
     wire       right = (x[9:6] == 4'b0010);
-    wire       left  = (x[9:5] == 5'b00001) | (x[9:5] == 5'b00010);
-    wire       panel = (right | left) & (y[8:6] == 3'b110);
+    wire       panel = right & (y[8:6] == 3'b110);
     wire [2:0] cx    = x[4:2];
     wire [2:0] cy    = y[5:3];
-    // the speed bar: v / 4 rows up from the panel's bottom row, in columns 48-79
-    wire       bar   = left & ((x[9:4] == 6'd3) | (x[9:4] == 6'd4)) & (~y[5:0] < v[7:2]);
     // Which digit is next is worked out one column ahead and registered, which
     // takes the digit choice off the path from x through the segment decoder.
     wire       next5 = x[5] ^ (&x[4:0]);
@@ -1035,8 +1034,7 @@ module score_display (
                (seg[4] & (cx == 3'd0) & lower) | (seg[5] & (cx == 3'd0) & upper) |
                (seg[6] & mid & (cy == 3'd4));
 
-    assign code = !panel ? 2'd0 : ((right & lit) | bar) ? 2'd2 : 2'd1;
-    wire _unused = &{v[1:0], 1'b0};
+    assign code = !panel ? 2'd0 : lit ? 2'd2 : 2'd1;
 endmodule
 
 // ==========================================================================
