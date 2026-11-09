@@ -25,8 +25,7 @@ the horizon. On the grass the car is slowed down.
 distance z, so after perspective its offset on screen is proportional to z. The
 divider already produces z, so each line's offset is up to three shifted adds in
 horizontal blanking. The track is a loop of 16 segments, curvature eases in and
-out with distance, and every bend pushes the car outwards, so you have to steer
-through them.
+out with distance, and a bend carries the car outwards unless you steer.
 
 **Traffic.** You drive on the right. A slow car holds your lane and an oncoming
 car uses the left lane, so overtaking means judging the gap. Scanning down the
@@ -46,8 +45,9 @@ the gap between two octagons, tested from |dx|, |dy| and |dx| + |dy|, and the
 spoke is sheared with a slope of wheel/4, which is a shift.
 
 **Sound.** The engine note is a sawtooth plus a square an octave below, with a
-pitch that rises with speed (about 61 Hz idling to 244 Hz flat out). Off the road
-and in a crash, noise from an LFSR is mixed in. The audio pin is PWM.
+pitch that rises with speed (about 61 Hz idling to 488 Hz flat out) and a little
+LFSR noise on half of each cycle. Off the road and in a crash, more noise is
+mixed in. The audio pin is PWM.
 
 The design was written against a bit-exact Python model and checked frame by
 frame against it from the VGA pins.

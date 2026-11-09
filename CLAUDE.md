@@ -16,10 +16,11 @@ It is a first-person pseudo-3D driving game drawn straight to VGA, with sound.
 
 - The 1x2 design is on `main`: curves, traffic, crashes, score, interior,
   sunset, steering wheel, road and cars twice as wide as the eye is high.
-- Tiny Tapeout build of 13112fa on 1x2: 85.5% core utilisation (core
-  107,931 um^2), worst slow-corner setup slack +0.32 ns, 0 setup and hold
+- Tiny Tapeout build of 14f50d4 on 1x2: 84.6% core utilisation (core
+  107,931 um^2), worst slow-corner setup slack +3.07 ns, 0 setup and hold
   violations, 4 routing passes, DRC/LVS/antenna clean. Before LibreLane:
-  80,641 um^2, 470 flip-flops.
+  80,384 um^2. The 1x1 version (branch 1x1-version) has the same engine and
+  speed changes and a 2x road: 83.9%, +6.04 ns.
 - **1x2 is full and timing has almost no margin.** Slack has moved by several
   ns between near-identical layouts, so any RTL change, even a comment (it can
   change generated cell names), may break timing. Do not change dev/rtl or
@@ -131,10 +132,10 @@ Commit and push to main is fine: Yamin asked for direct edits.
   and when the road curves those rows are grass. Negative kappa's magnitude
   is its bit inversion. kappa moves one step every 4 wraps of D towards the
   value in the 16-segment track table (64 wraps per segment). |kappa| >= 4
-  pushes the heading outwards.
+  pushes the heading outwards, but only while the wheel is centred.
 - Stripes: bit 3 of z + (D >> 5); off for s_y < 32 to avoid shimmer.
 - Car state, once per frame, stepped over 7 clocks after the frame pulse:
-  speed v (0..192), wheel (-2..2, self-centring), heading h (pixels, held past
+  speed v (0..224, +2 per frame below 128), wheel (-2..2, self-centring), heading h (pixels, held past
   +/-96), sideways position P (p = P >>> 6, right lane p = 32, road edge
   |p| = 64, grass from 72, held past 80), distance D (9 bits, wraps). Speed
   factor k = 0, 1, 2 so products are shifts.
@@ -150,8 +151,9 @@ Commit and push to main is fine: Yamin asked for direct edits.
 - Steering wheel: dev/rtl/steering_wheel.v, FULL = 1 (radius 128, centre
   (320, 448)) is built; it takes two clocks, which moves it one pixel right.
   WHEEL_FULL = 0 selects the small 1x1 version.
-- Audio: phase accumulator stepped once per line, step 128 + 2v (61-244 Hz),
-  sawtooth plus sub-octave square, LFSR noise off-road and in a crash, PWM
+- Audio: phase accumulator stepped once per line, step (v + 32) << 2 (61-488 Hz),
+  sawtooth plus sub-octave square, a little LFSR noise on half of each cycle,
+  more off-road and in a crash, PWM
   against x[7:0], registered output on uio[0] (uio_oe = 1).
 - Pixel colour is a 2-stage pipeline; syncs are delayed one clock to match.
   The pins show pixel (x, y) two clocks after the counters were at (x, y).
