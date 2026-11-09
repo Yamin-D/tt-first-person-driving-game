@@ -9,10 +9,10 @@ distance. With the eye at height H and focal length f, row s_y below the horizon
 shows the road at distance z = fH / s_y. That is the only division in the
 design: a small serial divider produces one quotient bit per clock while the
 previous line is in horizontal blanking. Everything else is linear in s_y, so
-the road's half-width is just s_y and the steering offset is built by adding
-the car's sideways position once per line. Stripes, kerbs and the centre line
-come from one bit of z plus the distance travelled, so they rush towards you as
-you speed up.
+the road's half-width is just twice s_y and the steering offset is built by
+adding the car's sideways position once per line. Stripes, kerbs and the centre
+line come from one bit of z plus the distance travelled, so they rush towards
+you as you speed up. Above the road is a sunset behind a ridge of mountains.
 
 **Driving.** Once per frame the car's speed, wheel angle, heading and sideways
 position are updated. Holding left or right turns the wheel; the heading follows
@@ -26,8 +26,9 @@ the gap between two octagons, tested from |dx|, |dy| and |dx| + |dy|, and the
 spoke is sheared with a slope of wheel/4, which is a shift.
 
 **Sound.** The engine note is a sawtooth plus a square an octave below, with a
-pitch that rises with speed (about 61 Hz idling to 244 Hz flat out). Off the road,
-noise from an LFSR is mixed in for a gravel rumble. The audio pin is PWM.
+pitch that rises with speed (about 61 Hz idling to 488 Hz flat out) and a little
+LFSR noise on half of each cycle. Off the road, more noise is mixed in for a
+gravel rumble. The audio pin is PWM.
 
 The design was written against a bit-exact Python model and checked frame by
 frame against it from the VGA pins.
