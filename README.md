@@ -23,6 +23,10 @@ This repository holds two complete versions of the game, each on its own branch.
 
 The clips above are rendered from the bit-exact Python model of each design, so they show what the chip draws.
 
+## Background
+
+I came into the Vulkos workshop knowing very little about Verilog or chip design, and this game grew out of the workshop's car game. The workshop's seven-segment, music player and paddle-and-ball projects were how I worked out how audio and VGA outputs actually behave, and they deepened my understanding a lot. Developing these games has been a real accomplishment for me, and it has encouraged me to pursue chip design further.
+
 ## How it works
 
 **Racing the beam.** A flat road seen from height H with focal length f has the simple property that the screen row s_y below the horizon shows the road at distance z = fH / s_y. That is the only division in the design. A small serial divider produces one quotient bit per clock during horizontal blanking, ready for the next line. Everything else is linear in s_y, so the road's half-width is just twice s_y, a shift, and the road centre is built by adding the car's position once per line. The pixel logic is then a single adder and a few comparisons.
@@ -54,6 +58,8 @@ Fitting the design to the tile drove many of the decisions:
 - Multiplying by a power of two is only wiring on a chip like this. Widening the road by 1.5x needed adders throughout, while 2x was free, and using 2x saved about 4,900 µm².
 - Long per-pixel paths were split into pipeline stages, and signals with very high fan-out were given local copies. Synthesis merges identical copies, so the copies had to be made different.
 - Features were weighed against each other for area: the speed bar on the 1x2 version was removed to make room for the rest.
+
+I used Claude Code alongside this, which let me prototype much faster: turning ideas into Verilog, building the Python model and tests that each version is checked against, and working through the area and timing problems, while I decided what the game should be and which trade-offs to make.
 
 ## Results
 
