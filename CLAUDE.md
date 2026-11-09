@@ -7,7 +7,7 @@ It is a first-person pseudo-3D driving game drawn straight to VGA, with sound.
 - **Deadline: Monday 16 November 2026.** Entry = this repository's link,
   emailed to contact@vulkos.co.uk once the Datasheet, Tests and Layout build
   checks are green on the latest commit. Pushing more commits updates the entry.
-- `main` is the 1x2 design. `1x1-fallback` keeps the last 1x1 version.
+- `main` is the 1x2 version. Branch `1x1-version` is the 1x1 version.
 - Yamin also uses Vulkos (web IDE with LibreLane and a VGA preview). Vulkos
   pushes to and pulls from this repo; after pushing from here, he must use
   "Cool stuff > Pull from GitHub" in Vulkos before pushing from Vulkos again.
@@ -26,7 +26,7 @@ It is a first-person pseudo-3D driving game drawn straight to VGA, with sound.
   src/project.v without a reason worth a new layout round.
 - Vulkos (Matthew) confirmed 1x2 is allowed, and asked for both versions to be
   submitted through the GitHub link with the README explaining there are two.
-  Keep `1x1-fallback` green: it is a submission too, not just a backup.
+  Keep `1x1-version` green: it is a submission too, not just a backup.
 - Not built, for lack of room: softer two-layer mountains, bumper strip, round
   vents, road-edge barrier, sun. The speed bar was removed to fit, so engine
   pitch is the only speed cue.

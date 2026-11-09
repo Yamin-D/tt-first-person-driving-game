@@ -10,8 +10,8 @@ This repository holds two versions of the game, both submitted to the Vulkos Uni
 
 | Version | Branch | Features |
 |---|---|---|
-| **1x2 tile** | [`main`](https://github.com/Yamin-D/tt-first-person-driving-game) | Curved roads on a looping track, traffic with overtaking, crashes, a score, a car interior, a sunset, a large steering wheel, engine sound |
-| **1x1 tile** | [`1x1-fallback`](https://github.com/Yamin-D/tt-first-person-driving-game/tree/1x1-fallback) | Straight road with steering and speed, distant mountains, a small steering wheel, a speed bar, engine sound |
+| **1x2 version** | [`main`](https://github.com/Yamin-D/tt-first-person-driving-game) | Curved roads on a looping track, traffic with overtaking, crashes, a score, a car interior, a sunset, a large steering wheel, engine sound |
+| **1x1 version** | [`1x1-version`](https://github.com/Yamin-D/tt-first-person-driving-game/tree/1x1-version) | Straight road with steering and speed, distant mountains, a small steering wheel, a speed bar, engine sound |
 
 - [Read the documentation for the 1x2 version](docs/info.md)
 
