@@ -668,7 +668,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire [7:0] u8     = x[7:0] + h[7:0];
     wire [6:0] u      = u8[7:1];                  // twice as wide: less toothy
     wire [4:0] tri_w  = u[5] ? ~u[4:0] : u[4:0];
-    wire [5:0] mh     = {1'b0, tri_w} + (u[6] ? {2'b00, tri_w[4:1]} : 6'd0);
+    wire [5:0] mh     = u[6] ? {1'b0, tri_w} : {2'b00, tri_w[4:1]};   // alternate hills
     reg  [5:0] mh_q;                              // height, compared in stage 2
     wire       peak   = ({1'b0, ~y_q[6:0]} < {2'b00, mh_q});  // 127 - y < height
 

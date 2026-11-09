@@ -350,7 +350,7 @@ def render(car):
     d_hi = car.D >> D_SHIFT                # 4 bits of distance
     u = ((x + car.h) & 0xFF) >> 1          # mountain column, twice as wide: wraps every 256 px
     tri = np.where(u & 0x20, 31 - (u & 0x1F), u & 0x1F)        # 0..31 ramp
-    mountain_h = tri + np.where(u & 0x40, tri >> 1, 0)          # alternate peaks
+    mountain_h = np.where(u & 0x40, tri, tri >> 1)              # alternate hills: no adder
     A = 0
     bases = (base_row(car, car.slow), base_row(car, car.onc))
     for y in range(H_SCREEN):
