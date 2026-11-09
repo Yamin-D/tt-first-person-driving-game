@@ -32,7 +32,13 @@ module score_display (
     wire       panel = (right | left) & (y[8:6] == 3'b110);
     wire [2:0] cx    = x[4:2];
     wire [2:0] cy    = y[5:3];
-    wire [3:0] digit = right ? (x[5] ? ones : tens) : (x[5] ? speed[7:4] : speed[3:0]);
+    // Which digit is next is worked out one column ahead and registered, which
+    // takes the digit choice off the path from x through the segment decoder.
+    wire       next5 = x[5] ^ (&x[4:0]);
+    wire       next7 = x[7] ^ (&x[6:0]);
+    reg  [3:0] digit;
+    always @(posedge clk)
+        digit <= next7 ? (next5 ? ones : tens) : (next5 ? speed[7:4] : speed[3:0]);
 
     reg [6:0] seg;                                          // gfedcba
     always @(*) begin

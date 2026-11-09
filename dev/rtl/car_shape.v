@@ -19,7 +19,8 @@ module car_shape (
 );
     wire [7:0] half  = {1'b0, s[7:1]};
     wire [7:0] w     = {3'b000, s[7:3]};
-    wire [7:0] h_w   = half - w;
+    wire [7:0] w2    = {4'b0000, s[7:4]};        // lamp width
+    wire [7:0] h_w   = half - w2;
     wire [8:0] h_p   = {1'b0, half} + {1'b0, w};
 
     // everything is measured from the rear face's near edge
@@ -28,7 +29,7 @@ module car_shape (
     wire [7:0]  ul   = u[7:0];
 
     wire lt_half = near & (ul < half);
-    wire lamp    = (ul < w) | (ul >= h_w);
+    wire lamp    = (ul < w2) | (ul >= h_w);
 
     assign kind = !(rows & lt_half) ? 2'd0 :
                   window ? (lamp ? 2'd1 : 2'd2) : (lamp ? 2'd3 : 2'd1);

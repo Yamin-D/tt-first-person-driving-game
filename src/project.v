@@ -618,10 +618,10 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     localparam [5:0] SLOW_LAMP = 6'b11_00_00;
     localparam [5:0] ONC_BODY  = 6'b11_11_11;
     localparam [5:0] ONC_LAMP  = 6'b11_11_00;
-    localparam [5:0] SLOW_GLASS = 6'b00_00_01;
-    localparam [5:0] ONC_GLASS  = 6'b00_01_10;
-    localparam [5:0] SLOW_SIDE = 6'b00_00_10;
-    localparam [5:0] ONC_SIDE  = 6'b10_10_10;
+    localparam [5:0] SLOW_GLASS = 6'b10_01_01;
+    localparam [5:0] ONC_GLASS  = 6'b10_01_00;
+    localparam [5:0] SLOW_SIDE = 6'b00_00_01;
+    localparam [5:0] ONC_SIDE  = 6'b01_01_01;
     localparam [5:0] PANEL_COL = 6'b00_00_00;
     localparam [5:0] BAR_COL  = 6'b11_10_00;
     localparam [5:0] LINE_COL = 6'b11_11_11;
@@ -1007,7 +1007,13 @@ module score_display (
     wire       panel = (right | left) & (y[8:6] == 3'b110);
     wire [2:0] cx    = x[4:2];
     wire [2:0] cy    = y[5:3];
-    wire [3:0] digit = right ? (x[5] ? ones : tens) : (x[5] ? speed[7:4] : speed[3:0]);
+    // Which digit is next is worked out one column ahead and registered, which
+    // takes the digit choice off the path from x through the segment decoder.
+    wire       next5 = x[5] ^ (&x[4:0]);
+    wire       next7 = x[7] ^ (&x[6:0]);
+    reg  [3:0] digit;
+    always @(posedge clk)
+        digit <= next7 ? (next5 ? ones : tens) : (next5 ? speed[7:4] : speed[3:0]);
 
     reg [6:0] seg;                                          // gfedcba
     always @(*) begin
@@ -1060,7 +1066,8 @@ module car_shape (
 );
     wire [7:0] half  = {1'b0, s[7:1]};
     wire [7:0] w     = {3'b000, s[7:3]};
-    wire [7:0] h_w   = half - w;
+    wire [7:0] w2    = {4'b0000, s[7:4]};        // lamp width
+    wire [7:0] h_w   = half - w2;
     wire [8:0] h_p   = {1'b0, half} + {1'b0, w};
 
     // everything is measured from the rear face's near edge
@@ -1069,7 +1076,7 @@ module car_shape (
     wire [7:0]  ul   = u[7:0];
 
     wire lt_half = near & (ul < half);
-    wire lamp    = (ul < w) | (ul >= h_w);
+    wire lamp    = (ul < w2) | (ul >= h_w);
 
     assign kind = !(rows & lt_half) ? 2'd0 :
                   window ? (lamp ? 2'd1 : 2'd2) : (lamp ? 2'd3 : 2'd1);

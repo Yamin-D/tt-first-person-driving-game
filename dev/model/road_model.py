@@ -52,8 +52,8 @@ MIRROR   = c(2,2,2)
 VENT_COL = c(2,2,2)
 SLOW_BODY, SLOW_LAMP = c(0,1,3), c(3,0,0)
 ONC_BODY,  ONC_LAMP  = c(3,3,3), c(3,3,0)
-SLOW_SIDE, ONC_SIDE = c(0,0,2), c(2,2,2)
-SLOW_GLASS, ONC_GLASS = c(0,0,1), c(0,1,2)
+SLOW_SIDE, ONC_SIDE = c(0,0,1), c(1,1,1)
+SLOW_GLASS, ONC_GLASS = c(2,1,1), c(2,1,0)     # the sunset, reflected
 PANEL_COL = c(0,0,0)
 BAR_COL  = c(3,2,0)
 LINE_COL = c(3,3,3)
@@ -285,7 +285,7 @@ def draw_cars(row, d, left, s_y, car, now):
         outer = lane & road_side & (da >= b) & (da < b + w) & (d < b_row)
         row[inner | outer] = flank
         face = lane & (da >= a) & (da < b)
-        outside = (da < a + w) | (da >= b - w)
+        outside = (da < a + (s >> 4)) | (da >= b - (s >> 4))
         row[face] = body
         # the top band is the window; an oncoming car's windscreen is taller
         if s_y < (s >> 1) + (s >> 3) + ((s >> 2) if is_left else (s >> 3)):
