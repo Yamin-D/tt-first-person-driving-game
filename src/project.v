@@ -726,7 +726,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         rows_slow_q <= ({1'b0, s_now} >= top_slow) && (s_now <= s_slow);
         rows_onc_q  <= ({1'b0, s_now} >= top_onc)  && (s_now <= s_onc);
         win_slow_q  <= ({1'b0, s_now} < top_slow + {4'b0000, s_slow[7:3]});
-        win_onc_q   <= ({1'b0, s_now} < top_onc  + {4'b0000, s_onc[7:3]});
+        win_onc_q   <= ({1'b0, s_now} < top_onc  + {3'b000, s_onc[7:2]});
         col_b_q     <= {1'b0, s_now[7:1]} + {2'b00, s_now[7:2]};
     end
 
@@ -803,6 +803,8 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
             rgb = MIRROR;
         else if (inner_q == 3'd5)
             rgb = VENT_COL;
+        else if (inner_q == 3'd4)
+            rgb = PANEL_COL;
         else if (sky)
             rgb = peak_q ? MOUNTAIN :
                   (y_q[6:5] == 2'd0) ? (dither_q ? SKY1 : SKY0) :
@@ -943,7 +945,7 @@ endmodule
 // away from the centre going up: t = y/4 + ~x is -48..-1 on the pillar and
 // >= 0 on the side window beyond it, which needs one adder and no carry in.
 // code: 0 none, 1 roof or pillar, 2 mirror, 3 top of the dashboard,
-//       5 vent slat, 6 side window.
+//       4 console panel, 5 grille slat, 6 side window.
 
 module interior (
     input  wire [9:0] x,
@@ -957,12 +959,15 @@ module interior (
     wire window = ~dash & ~roof & ~t[10];
     wire mirror = (x[9:7] == 3'b010) & (y[9:4] == 6'd1);    // rows 16-31
     wire pad    = (y[8:4] == 5'b10110);                     // rows 352-367
-    wire vent   = (y[8:5] == 4'b1101) & (x[9:6] == 4'b1001) & (x[5:4] != 2'b11) & y[2];
+    // the centre console: a dark panel with a grille of slats inset in it
+    wire console = (x[9:7] == 3'b100) & y[8] & y[7] & (y[6] | y[5]);
+    wire vent    = console & (x[6:4] != 3'd0) & y[2] & (y[8:3] != 6'b110100);
 
     assign code = mirror        ? 3'd2 :
                   roof | pillar ? 3'd1 :
                   pad           ? 3'd3 :
                   vent          ? 3'd5 :
+                  console       ? 3'd4 :
                   window        ? 3'd6 : 3'd0;
 endmodule
 
@@ -970,7 +975,7 @@ endmodule
 // score_display.v
 // ==========================================================================
 // Two pairs of seven-segment digits on the dashboard, rows 384-447: the score at
-// columns 512-575 and the speed (v / 2, 0..96) at columns 64-127. One decoder
+// columns 128-191 and the speed (v / 2, 0..96) at columns 32-95. One decoder
 // serves all four digits, since only one is being scanned at a time. Each digit is a 32 x 64 cell of 4 x 8 pixel blocks, cx 0-7 and cy 0-7.
 // code: 0 none, 1 panel, 2 lit segment.
 
@@ -997,12 +1002,12 @@ module score_display (
     always @(posedge clk)
         speed <= bcd;
 
-    wire       right = (x[9:6] == 4'b1000);
-    wire       left  = (x[9:6] == 4'b0001);
+    wire       right = (x[9:6] == 4'b0010);
+    wire       left  = (x[9:5] == 5'b00001) | (x[9:5] == 5'b00010);
     wire       panel = (right | left) & (y[8:6] == 3'b110);
     wire [2:0] cx    = x[4:2];
     wire [2:0] cy    = y[5:3];
-    wire [3:0] digit = right ? (x[5] ? ones : tens) : (x[5] ? speed[3:0] : speed[7:4]);
+    wire [3:0] digit = right ? (x[5] ? ones : tens) : (x[5] ? speed[7:4] : speed[3:0]);
 
     reg [6:0] seg;                                          // gfedcba
     always @(*) begin

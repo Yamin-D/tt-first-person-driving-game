@@ -1,5 +1,5 @@
 // Two pairs of seven-segment digits on the dashboard, rows 384-447: the score at
-// columns 512-575 and the speed (v / 2, 0..96) at columns 64-127. One decoder
+// columns 128-191 and the speed (v / 2, 0..96) at columns 32-95. One decoder
 // serves all four digits, since only one is being scanned at a time. Each digit is a 32 x 64 cell of 4 x 8 pixel blocks, cx 0-7 and cy 0-7.
 // code: 0 none, 1 panel, 2 lit segment.
 `default_nettype none
@@ -27,12 +27,12 @@ module score_display (
     always @(posedge clk)
         speed <= bcd;
 
-    wire       right = (x[9:6] == 4'b1000);
-    wire       left  = (x[9:6] == 4'b0001);
+    wire       right = (x[9:6] == 4'b0010);
+    wire       left  = (x[9:5] == 5'b00001) | (x[9:5] == 5'b00010);
     wire       panel = (right | left) & (y[8:6] == 3'b110);
     wire [2:0] cx    = x[4:2];
     wire [2:0] cy    = y[5:3];
-    wire [3:0] digit = right ? (x[5] ? ones : tens) : (x[5] ? speed[3:0] : speed[7:4]);
+    wire [3:0] digit = right ? (x[5] ? ones : tens) : (x[5] ? speed[7:4] : speed[3:0]);
 
     reg [6:0] seg;                                          // gfedcba
     always @(*) begin

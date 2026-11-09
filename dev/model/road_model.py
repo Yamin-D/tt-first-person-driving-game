@@ -287,18 +287,19 @@ def draw_cars(row, d, left, s_y, car, now):
         face = lane & (da >= a) & (da < b)
         outside = (da < a + w) | (da >= b - w)
         row[face] = body
-        if s_y < (s >> 1) + (s >> 3) + (s >> 3):        # the top band is the window
+        # the top band is the window; an oncoming car's windscreen is taller
+        if s_y < (s >> 1) + (s >> 3) + ((s >> 2) if is_left else (s >> 3)):
             row[face & ~outside] = glass
         else:
             row[face & outside] = lamp
 
 def score_code(tens, ones, v):
-    """0 none, 1 panel, 2 lit segment, rows 384-447: the score at columns 512-575
-    and the speed, v/2 so 0..96, at columns 64-127."""
+    """0 none, 1 panel, 2 lit segment, rows 384-447: the score at columns 128-191
+    and the speed, v/2 so 0..96, at columns 32-95."""
     y_, x_ = np.mgrid[0:H_SCREEN, 0:W_SCREEN]
     rows = (y_ >= 384) & (y_ < 448)
-    right = (x_ >= 512) & (x_ < 576) & rows
-    left = (x_ >= 64) & (x_ < 128) & rows
+    right = (x_ >= 128) & (x_ < 192) & rows
+    left = (x_ >= 32) & (x_ < 96) & rows
     panel = right | left
     speed = v >> 1
     cx, cy = (x_ >> 2) & 7, (y_ >> 3) & 7
@@ -307,8 +308,8 @@ def score_code(tens, ones, v):
     parts = dict(a=mid & (cy == 0), b=(cx == 6) & upper, c=(cx == 6) & lower, d=mid & (cy == 7),
                  e=(cx == 0) & lower, f=(cx == 0) & upper, g=mid & (cy == 4))
     lit = np.zeros_like(x_, dtype=bool)
-    for digit, columns in ((tens, right & (x_ < 544)), (ones, right & (x_ >= 544)),
-                           (speed // 10, left & (x_ < 96)), (speed % 10, left & (x_ >= 96))):
+    for digit, columns in ((tens, right & (x_ < 160)), (ones, right & (x_ >= 160)),
+                           (speed // 10, left & (x_ < 64)), (speed % 10, left & (x_ >= 64))):
         for name in SEGMENTS[digit]:
             lit |= parts[name] & columns
     code = np.zeros_like(x_)
@@ -319,7 +320,7 @@ def score_code(tens, ones, v):
 # ---------------------------------------------------------------- interior
 def interior_code():
     """Per-pixel interior code: 0 none, 1 roof or pillar, 2 mirror, 3 top of the
-    dashboard, 5 vent slat, 6 side window. We sit on the left,
+    dashboard, 4 console panel, 5 grille slat, 6 side window. We sit on the left,
     so only the left has a pillar. t = y/4 + ~x uses one's complement, and the
     pillar is where t is -48..-1 and the window where t >= 0."""
     y_, x_ = np.mgrid[0:H_SCREEN, 0:W_SCREEN]
@@ -330,9 +331,11 @@ def interior_code():
     window = ~dash & ~roof & (t >= 0)
     mirror = (x_ >= 256) & (x_ < 384) & (y_ >= 16) & (y_ < 32)
     pad = dash & (y_ < DASH_TOP + 16)
-    vent = (y_ >= 416) & (y_ < 448) & (x_ >= 576) & (x_ < 624) & ((y_ >> 2) & 1 == 1)
+    console = (x_ >= 512) & (y_ >= 416)
+    vent = (y_ >= 424) & (x_ >= 528) & ((y_ >> 2) & 1 == 1)   # the grille
     code = np.zeros_like(x_)
     code[window] = 6
+    code[console] = 4
     code[vent] = 5
     code[pad] = 3
     code[roof | pillar] = 1
@@ -391,6 +394,7 @@ def render(car):
     img[inner == 1] = COCKPIT
     img[inner == 2] = MIRROR
     img[inner == 3] = COCKPIT
+    img[inner == 4] = PANEL_COL
     img[inner == 5] = VENT_COL
     score = score_code(car.tens, car.ones, car.v)
     img[score == 1] = PANEL_COL

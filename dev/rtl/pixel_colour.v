@@ -156,7 +156,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         rows_slow_q <= ({1'b0, s_now} >= top_slow) && (s_now <= s_slow);
         rows_onc_q  <= ({1'b0, s_now} >= top_onc)  && (s_now <= s_onc);
         win_slow_q  <= ({1'b0, s_now} < top_slow + {4'b0000, s_slow[7:3]});
-        win_onc_q   <= ({1'b0, s_now} < top_onc  + {4'b0000, s_onc[7:3]});
+        win_onc_q   <= ({1'b0, s_now} < top_onc  + {3'b000, s_onc[7:2]});
         col_b_q     <= {1'b0, s_now[7:1]} + {2'b00, s_now[7:2]};
     end
 
@@ -233,6 +233,8 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
             rgb = MIRROR;
         else if (inner_q == 3'd5)
             rgb = VENT_COL;
+        else if (inner_q == 3'd4)
+            rgb = PANEL_COL;
         else if (sky)
             rgb = peak_q ? MOUNTAIN :
                   (y_q[6:5] == 2'd0) ? (dither_q ? SKY1 : SKY0) :
