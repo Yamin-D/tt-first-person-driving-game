@@ -20,15 +20,17 @@ module car_state (
     output reg  signed [2:0] wheel,
     output reg  signed [7:0] h,
     output wire signed [7:0] p,
+    output wire signed [8:0] p2,        // the screen offset per line: p, counted double
     output reg         [8:0] D,
     output reg               offroad
 );
-    localparam [7:0] V_MAX = 8'd192;
+    localparam [7:0] V_MAX = 8'd224;
 
     reg signed [13:0] P;
     reg        [2:0]  n;          // frame counter for coasting drag
 
     assign p = P[13:6];           // same as P >>> 6
+    assign p2 = P[13:5];
     // |p| >= 72 without working out |p|: compare against constants. Registered:
     // P changes only on step_p, long before the next frame pulse reads it.
     always @(posedge clk)
@@ -38,7 +40,7 @@ module car_state (
     reg signed [3:0] d;
     always @(*) begin
         if (offroad && v > 8'd96) d = brake ? -4'sd4 : -4'sd2;   // grass drag
-        else if (accel)           d = (v == V_MAX) ? 4'sd0 : 4'sd1;
+        else if (accel)           d = (v == V_MAX) ? 4'sd0 : (v[7] ? 4'sd1 : 4'sd2);
         else if (brake)           d = -4'sd4;
         else if (n == 3'd0)       d = -4'sd1;
         else                      d = 4'sd0;
@@ -91,7 +93,8 @@ module car_state (
     // position: P + h*k, held once |p| passes 96
     wire signed [13:0] h14   = {{6{h[7]}}, h};
     wire signed [13:0] dP    = k2 ? (h14 <<< 1) : (k1 ? h14 : 14'sd0);
-    wire               P_stop = at_limit(P[13:11], h[7], (h == 8'sd0) || !(k1 || k2));
+    wire               P_stop = !((h == 8'sd0) || !(k1 || k2)) &&
+                                (h[7] ? (P[13:9] == 5'b10110) : (P[13:9] == 5'b01001));   // |p| >= 72
     wire signed [13:0] P1    = P_stop ? P : P + dP;
 
     always @(posedge clk) begin

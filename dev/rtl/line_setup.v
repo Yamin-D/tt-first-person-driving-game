@@ -16,7 +16,7 @@ module line_setup #(
     input  wire        [9:0]  x,
     input  wire        [9:0]  y,
     input  wire signed [7:0]  h,
-    input  wire signed [7:0]  p,
+    input  wire signed [8:0]  p,           // position, counted double: P >>> 5
     output wire [Z_BITS-1:0]  z,
     output reg  signed [16:0] A
 );
@@ -76,7 +76,7 @@ module line_setup #(
         if (a_load)
             A <= {h_off, 6'b000000};
         else if (a_add)
-            A <= A + {{9{p[7]}}, p};
+            A <= A + {{8{p[8]}}, p};
     end
     wire _unused = &{diff[8], 1'b0};
 endmodule

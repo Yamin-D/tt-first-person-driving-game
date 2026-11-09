@@ -46,19 +46,20 @@ module tt_um_road_racer #(
     wire signed [2:0] wheel;
     wire signed [7:0] h;
     wire signed [7:0] p;
+    wire signed [8:0] p2;
     wire        [8:0] D;
     wire              offroad;
     car_state car (
         .clk(clk), .rst_n(rst_q), .frame(frame),
         .left(btn[0]), .right(btn[1]), .accel(btn[2]), .brake(btn[3]),
-        .v(v), .wheel(wheel), .h(h), .p(p), .D(D), .offroad(offroad)
+        .v(v), .wheel(wheel), .h(h), .p(p), .p2(p2), .D(D), .offroad(offroad)
     );
 
     // ---- per-line values
     wire         [3:0] z;
     wire signed [16:0] A;
     line_setup #(.Z_BITS(4)) line (
-        .clk(clk), .rst_n(rst_q), .x(x), .y(y), .h(h), .p(p),
+        .clk(clk), .rst_n(rst_q), .x(x), .y(y), .h(h), .p(p2),
         .z(z), .A(A)
     );
 
@@ -93,5 +94,5 @@ module tt_um_road_racer #(
     assign uio_out = {7'b0000000, audio};
     assign uio_oe  = 8'b0000_0001;
 
-    wire _unused = &{ena, uio_in, ui_in[7:4], D[4:0], frame, sample, 1'b0};
+    wire _unused = &{p, ena, uio_in, ui_in[7:4], D[4:0], frame, sample, 1'b0};
 endmodule

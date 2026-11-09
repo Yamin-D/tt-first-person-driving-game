@@ -22,7 +22,7 @@ C_SHIFT  = 14           # fH = 2**14, so z = 2**14 // s_y, s_y = 1..255
 STRIPE_BIT = 3          # band half-period = 8 units of road
 D_SHIFT  = 5            # stripes use D >> 5 (4 bits)
 FOG_SY   = 32           # no stripes for s_y < 32 (s_y[7:5] == 0)
-V_MAX    = 192
+V_MAX    = 224
 WHEEL_FULL = False      # False: small wheel for 1x1, True: full wheel for 1x2
 BAR_X0, BAR_X1 = 64, 96 # columns of the vertical speed bar
 ROAD_EDGE, KERB_EDGE = 64, 72   # |p| thresholds (W/H = 1, kerb is w/8)
@@ -55,12 +55,13 @@ def serial_recip(s_y):
 # ---------------------------------------------------------------- car state
 P_FRAC = 6             # fraction bits on the sideways position
 
-LIMIT = 96             # |h| and |p| stop growing outwards beyond this
+LIMIT = 96             # |h| stops growing outwards beyond this
+P_LIMIT = 72           # and |p| beyond this
 
-def at_limit(value, step):
+def at_limit(value, step, limit=LIMIT):
     """True if adding `step` would push `value` further past +/-96. The
     hardware tests only the top three bits: value >= 96 or value <= -97."""
-    return (step > 0 and value >= LIMIT) or (step < 0 and value <= -LIMIT - 1)
+    return (step > 0 and value >= limit) or (step < 0 and value <= -limit - 1)
 
 class Car:
     def __init__(self):
@@ -87,7 +88,7 @@ class Car:
         outwards past +/-96, which keeps every value inside its bit width."""
         v = self.v
         if self.offroad() and v > 96:  d = -4 if brake else -2   # grass drag
-        elif accel:        d = 0 if v == V_MAX else 1
+        elif accel:        d = 0 if v == V_MAX else (2 if v < 128 else 1)
         elif brake:        d = -4
         elif self.n == 0:  d = -1
         else:              d = 0
@@ -102,7 +103,7 @@ class Car:
         if not at_limit(self.h, dh):
             self.h += dh
         dP = self.h * k
-        if not at_limit(self.p, dP):
+        if not at_limit(self.p, dP, P_LIMIT):
             self.P += dP
         self.D = (self.D + v) & 0x1FF
         self.n = (self.n + 1) & 0x7
@@ -174,7 +175,7 @@ def render(car):
                 img[y] = GRASS[0]
             else:
                 z = serial_recip(s_y)      # computed in previous line's hblank
-                w = s_y
+                w = s_y << 1               # the road is twice as wide as the eye is high
                 kerb_w = w + (w >> 3)
                 dash_w = (w >> 5) + 1
                 dx = x + (A >> 6)          # x - centre, one adder
@@ -190,7 +191,7 @@ def render(car):
         if y == HORIZON - 1:
             A = (car.h - 320) << 6         # centre offset folded into A
         elif HORIZON <= y < DASH_TOP:
-            A += car.p
+            A += car.P >> 5                # each unit of p counts double on screen
     code = wheel_code(car.wheel, WHEEL_FULL)
     img[code == 1] = WHEEL0
     img[code == 2] = BAR_COL
@@ -210,7 +211,7 @@ def engine_audio(speeds, offroads):
     phase, lfsr = 0, 0x7FFF
     out = []
     for v, off in zip(speeds, offroads):
-        inc = 128 + (v << 1)               # 61 Hz idle to 244 Hz at top speed
+        inc = (v + 32) << 2                # 61 Hz idle to 488 Hz at top speed
         for _ in range(525):
             phase = (phase + inc) & 0x1FFFF
             fb = ((lfsr >> 14) ^ (lfsr >> 13)) & 1
@@ -218,6 +219,8 @@ def engine_audio(speeds, offroads):
             s = ((phase >> 9) & 0x7F) + (64 if (phase >> 16) & 1 else 0)
             if off:
                 s ^= lfsr & 0x3F
+            elif (phase >> 15) & 1:            # rough: noise on half of each cycle
+                s ^= lfsr & 0x0F
             out.append(s & 0xFF)
     return np.array(out, np.uint8)
 

@@ -46,8 +46,9 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire [7:0] s_y = {~y[7], y[6:0]};               // y - 128, valid on road rows
 
     // ---- road geometry for this line (w = s_y)
-    wire [8:0] kerb_w = {1'b0, s_y} + {4'b0000, s_y[7:3]};
-    wire [3:0] dash_w = {1'b0, s_y[7:5]} + 4'd1;
+    wire [8:0] road_w = {s_y, 1'b0};                // twice s_y
+    wire [9:0] kerb_w = {1'b0, road_w} + {4'b0000, road_w[8:3]};
+    wire [4:0] dash_w = {1'b0, road_w[8:5]} + 5'd1;
 
     wire signed [10:0] a6 = A[16:6];                // A >>> 6
     wire signed [10:0] dx = $signed({1'b0, x}) + a6;    // x - centre
@@ -103,11 +104,11 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
             rgb = in_bar_q ? BAR_COL : DASH_COL;
         else if (s_y == 8'd0)
             rgb = GRASS0;
-        else if (stripe && d_q < {6'd0, dash_w})
+        else if (stripe && d_q < {5'd0, dash_w})
             rgb = LINE_COL;
-        else if (d_q < {2'b00, s_y})
+        else if (d_q < {1'b0, road_w})
             rgb = stripe ? TARMAC1 : TARMAC0;
-        else if (d_q < {1'b0, kerb_w})
+        else if (d_q < kerb_w)
             rgb = stripe ? KERB1 : KERB0;
         else
             rgb = stripe ? GRASS1 : GRASS0;

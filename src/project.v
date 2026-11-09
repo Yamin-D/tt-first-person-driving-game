@@ -51,19 +51,20 @@ module tt_um_yamin_d_first_person_driving_game #(
     wire signed [2:0] wheel;
     wire signed [7:0] h;
     wire signed [7:0] p;
+    wire signed [8:0] p2;
     wire        [8:0] D;
     wire              offroad;
     car_state car (
         .clk(clk), .rst_n(rst_q), .frame(frame),
         .left(btn[0]), .right(btn[1]), .accel(btn[2]), .brake(btn[3]),
-        .v(v), .wheel(wheel), .h(h), .p(p), .D(D), .offroad(offroad)
+        .v(v), .wheel(wheel), .h(h), .p(p), .p2(p2), .D(D), .offroad(offroad)
     );
 
     // ---- per-line values
     wire         [3:0] z;
     wire signed [16:0] A;
     line_setup #(.Z_BITS(4)) line (
-        .clk(clk), .rst_n(rst_q), .x(x), .y(y), .h(h), .p(p),
+        .clk(clk), .rst_n(rst_q), .x(x), .y(y), .h(h), .p(p2),
         .z(z), .A(A)
     );
 
@@ -98,7 +99,7 @@ module tt_um_yamin_d_first_person_driving_game #(
     assign uio_out = {7'b0000000, audio};
     assign uio_oe  = 8'b0000_0001;
 
-    wire _unused = &{ena, uio_in, ui_in[7:4], D[4:0], frame, sample, 1'b0};
+    wire _unused = &{p, ena, uio_in, ui_in[7:4], D[4:0], frame, sample, 1'b0};
 endmodule
 
 // ==========================================================================
@@ -187,15 +188,17 @@ module car_state (
     output reg  signed [2:0] wheel,
     output reg  signed [7:0] h,
     output wire signed [7:0] p,
+    output wire signed [8:0] p2,        // the screen offset per line: p, counted double
     output reg         [8:0] D,
     output reg               offroad
 );
-    localparam [7:0] V_MAX = 8'd192;
+    localparam [7:0] V_MAX = 8'd224;
 
     reg signed [13:0] P;
     reg        [2:0]  n;          // frame counter for coasting drag
 
     assign p = P[13:6];           // same as P >>> 6
+    assign p2 = P[13:5];
     // |p| >= 72 without working out |p|: compare against constants. Registered:
     // P changes only on step_p, long before the next frame pulse reads it.
     always @(posedge clk)
@@ -205,7 +208,7 @@ module car_state (
     reg signed [3:0] d;
     always @(*) begin
         if (offroad && v > 8'd96) d = brake ? -4'sd4 : -4'sd2;   // grass drag
-        else if (accel)           d = (v == V_MAX) ? 4'sd0 : 4'sd1;
+        else if (accel)           d = (v == V_MAX) ? 4'sd0 : (v[7] ? 4'sd1 : 4'sd2);
         else if (brake)           d = -4'sd4;
         else if (n == 3'd0)       d = -4'sd1;
         else                      d = 4'sd0;
@@ -258,7 +261,8 @@ module car_state (
     // position: P + h*k, held once |p| passes 96
     wire signed [13:0] h14   = {{6{h[7]}}, h};
     wire signed [13:0] dP    = k2 ? (h14 <<< 1) : (k1 ? h14 : 14'sd0);
-    wire               P_stop = at_limit(P[13:11], h[7], (h == 8'sd0) || !(k1 || k2));
+    wire               P_stop = !((h == 8'sd0) || !(k1 || k2)) &&
+                                (h[7] ? (P[13:9] == 5'b10110) : (P[13:9] == 5'b01001));   // |p| >= 72
     wire signed [13:0] P1    = P_stop ? P : P + dP;
 
     always @(posedge clk) begin
@@ -311,7 +315,7 @@ module line_setup #(
     input  wire        [9:0]  x,
     input  wire        [9:0]  y,
     input  wire signed [7:0]  h,
-    input  wire signed [7:0]  p,
+    input  wire signed [8:0]  p,           // position, counted double: P >>> 5
     output wire [Z_BITS-1:0]  z,
     output reg  signed [16:0] A
 );
@@ -371,7 +375,7 @@ module line_setup #(
         if (a_load)
             A <= {h_off, 6'b000000};
         else if (a_add)
-            A <= A + {{9{p[7]}}, p};
+            A <= A + {{8{p[8]}}, p};
     end
     wire _unused = &{diff[8], 1'b0};
 endmodule
@@ -426,8 +430,9 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire [7:0] s_y = {~y[7], y[6:0]};               // y - 128, valid on road rows
 
     // ---- road geometry for this line (w = s_y)
-    wire [8:0] kerb_w = {1'b0, s_y} + {4'b0000, s_y[7:3]};
-    wire [3:0] dash_w = {1'b0, s_y[7:5]} + 4'd1;
+    wire [8:0] road_w = {s_y, 1'b0};                // twice s_y
+    wire [9:0] kerb_w = {1'b0, road_w} + {4'b0000, road_w[8:3]};
+    wire [4:0] dash_w = {1'b0, road_w[8:5]} + 5'd1;
 
     wire signed [10:0] a6 = A[16:6];                // A >>> 6
     wire signed [10:0] dx = $signed({1'b0, x}) + a6;    // x - centre
@@ -483,11 +488,11 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
             rgb = in_bar_q ? BAR_COL : DASH_COL;
         else if (s_y == 8'd0)
             rgb = GRASS0;
-        else if (stripe && d_q < {6'd0, dash_w})
+        else if (stripe && d_q < {5'd0, dash_w})
             rgb = LINE_COL;
-        else if (d_q < {2'b00, s_y})
+        else if (d_q < {1'b0, road_w})
             rgb = stripe ? TARMAC1 : TARMAC0;
-        else if (d_q < {1'b0, kerb_w})
+        else if (d_q < kerb_w)
             rgb = stripe ? KERB1 : KERB0;
         else
             rgb = stripe ? GRASS1 : GRASS0;
@@ -577,9 +582,10 @@ endmodule
 // engine_audio.v
 // ==========================================================================
 // Engine sound. A phase accumulator steps once per line (31.25 kHz) with a step
-// that rises with speed: inc = 128 + 2v gives about 61 Hz idling, 244 Hz at top
-// speed. 128 + 2v = (v + 64) << 1, so it needs only a 2-bit increment. The sample is a sawtooth plus a square an octave below. Off the road,
-// LFSR noise is mixed in for a gravel rumble. The output pin is PWM: high
+// that rises with speed: inc = (v + 32) << 2 gives about 61 Hz idling, 488 Hz at
+// top speed. The sample is a sawtooth plus a square an octave below, roughened by
+// a little LFSR noise on half of each cycle. Off the road, more noise is mixed in
+// for a gravel rumble. The output pin is PWM: high
 // while the low 8 bits of the VGA x counter are below the sample, which gives
 // a 98 kHz carrier with no counter of its own.
 
@@ -596,21 +602,22 @@ module engine_audio (
     reg [16:0] phase;
     reg [14:0] lfsr;
 
-    wire [8:0] v64 = {1'b0, v} + 9'd64;
-    wire [9:0] inc = {v64, 1'b0};
+    wire [8:0] v32 = {1'b0, v} + 9'd32;
+    wire [10:0] inc = {v32, 2'b00};
 
     always @(posedge clk) begin
         if (!rst_n) begin
             phase <= 17'd0;
             lfsr  <= 15'h7FFF;
         end else if (tick) begin
-            phase <= phase + {7'd0, inc};
+            phase <= phase + {6'd0, inc};
             lfsr  <= {lfsr[13:0], lfsr[14] ^ lfsr[13]};
         end
     end
 
     wire [7:0] base = {1'b0, phase[15:9]} + (phase[16] ? 8'd64 : 8'd0);
-    assign sample = offroad ? (base ^ {2'b00, lfsr[5:0]}) : base;
+    assign sample = offroad ? (base ^ {2'b00, lfsr[5:0]}) :
+                    (base ^ {4'd0, lfsr[3:0] & {4{phase[15]}}});
 
     // registered, so the pin is driven straight from a flip-flop
     always @(posedge clk)
