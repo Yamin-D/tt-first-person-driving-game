@@ -24,10 +24,9 @@ It is a first-person pseudo-3D driving game drawn straight to VGA, with sound.
   ns between near-identical layouts, so any RTL change, even a comment (it can
   change generated cell names), may break timing. Do not change dev/rtl or
   src/project.v without a reason worth a new layout round.
-- Vulkos has been asked whether 1x2 is allowed, with no reply as of 9 Nov. If
-  the answer is no, `main` must go back to `1x1-fallback` before the deadline.
-  The repository link must also have been emailed to Vulkos for the entry to
-  count.
+- Vulkos (Matthew) confirmed 1x2 is allowed, and asked for both versions to be
+  submitted through the GitHub link with the README explaining there are two.
+  Keep `1x1-fallback` green: it is a submission too, not just a backup.
 - Not built, for lack of room: softer two-layer mountains, bumper strip, round
   vents, road-edge barrier, sun. The speed bar was removed to fit, so engine
   pitch is the only speed cue.

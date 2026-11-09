@@ -1,8 +1,21 @@
 ![](../../workflows/gds/badge.svg) ![](../../workflows/docs/badge.svg) ![](../../workflows/test/badge.svg) ![](../../workflows/fpga/badge.svg)
 
-# Tiny Tapeout Verilog Project Template
+# First Person Driving Game
 
-- [Read the documentation for project](docs/info.md)
+A first-person pseudo-3D driving game drawn straight to VGA, with sound, for GlobalFoundries 180 nm on Tiny Tapeout. There is no framebuffer: every pixel is computed as the screen is scanned.
+
+## Two versions
+
+This repository holds two versions of the game, both submitted to the Vulkos Unichip competition. Each builds on its own branch.
+
+| Version | Branch | Features |
+|---|---|---|
+| **1x2 tile** | [`main`](https://github.com/Yamin-D/tt-first-person-driving-game) | Curved roads on a looping track, traffic with overtaking, crashes, a score, a car interior, a sunset, a large steering wheel, engine sound |
+| **1x1 tile** | [`1x1-fallback`](https://github.com/Yamin-D/tt-first-person-driving-game/tree/1x1-fallback) | Straight road with steering and speed, distant mountains, a small steering wheel, a speed bar, engine sound |
+
+- [Read the documentation for the 1x2 version](docs/info.md)
+
+# About Tiny Tapeout
 
 ## What is Tiny Tapeout?
 
