@@ -666,10 +666,12 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire       stripe = band[3] & (s_y[7:5] != 3'b000);  // no stripes for s_y < 32
 
     // ---- mountains: a triangle wave indexed by x + h, so they slide as you turn
-    wire [6:0] u      = x[6:0] + h[6:0];
+    wire [7:0] u8     = x[7:0] + h[7:0];
+    wire [6:0] u      = u8[7:1];                  // twice as wide: less toothy
     wire [4:0] tri_w  = u[5] ? ~u[4:0] : u[4:0];
     wire [5:0] mh     = {1'b0, tri_w} + (u[6] ? {2'b00, tri_w[4:1]} : 6'd0);
-    wire       peak   = ({1'b0, ~y[6:0]} < {2'b00, mh});  // 127 - y < height
+    reg  [5:0] mh_q;                              // height, compared in stage 2
+    wire       peak   = ({1'b0, ~y_q[6:0]} < {2'b00, mh_q});  // 127 - y < height
 
     // ---- traffic. Scanning down, the last row with z >= zc is a car's base. Its Ae and s_y are stored there, and
     // the next frame draws from them, so the car is upright: one width and one
@@ -679,6 +681,10 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     reg        [7:0]  s_slow, s_onc;
     wire on_slow_next = (zs >= zc_slow);
     wire on_onc_next  = (zs >= zc_onc);
+    // a local reset, stored inverted so synthesis keeps it apart from the others
+    reg  rst_local;
+    always @(posedge clk)
+        rst_local <= ~rst_n;
     reg  base_ok, cap_slow, cap_onc;
     always @(posedge clk) begin
         base_ok  <= (y >= 10'd129) && (y <= 10'd382);   // rows 1..254
@@ -686,13 +692,9 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         cap_onc  <= latch && base_ok && on_onc  && !on_onc_next;
     end
     always @(posedge clk) begin
-        if (!rst_n) begin
-            on_slow <= 1'b0;
-            on_onc  <= 1'b0;
-            s_slow  <= 8'd0;
+        if (rst_local) begin
+            s_slow  <= 8'd0;                 // the rest need no reset: s = 0 draws nothing
             s_onc   <= 8'd0;
-            ae_slow <= 11'd0;
-            ae_onc  <= 11'd0;
         end else begin
             if (latch) begin
                 on_slow <= on_slow_next;
@@ -762,7 +764,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     reg [2:0] inner_q;
     reg [1:0] score_q;
     reg       left_q;
-    reg       peak_q, active_q, dither_q;
+    reg       active_q, dither_q;
     always @(posedge clk) begin
         d_q      <= d;
         left_q   <= dx[10];
@@ -771,7 +773,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         score_q  <= score_code;
         inner_q  <= inner_code;
         wheel_q  <= WHEEL_FULL ? wheel_code : {1'b0, wheel_code[0]};
-        peak_q   <= peak;
+        mh_q     <= mh;
         dither_q <= y[4] & (x[0] ^ y[0]);       // checkerboard in each band's lower half
         active_q <= active;
     end
@@ -809,7 +811,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         else if (inner_q == 3'd4)
             rgb = PANEL_COL;
         else if (sky)
-            rgb = peak_q ? MOUNTAIN :
+            rgb = peak ? MOUNTAIN :
                   (y_q[6:5] == 2'd0) ? (dither_q ? SKY1 : SKY0) :
                   (y_q[6:5] == 2'd1) ? (dither_q ? SKY2 : SKY1) :
                   (y_q[6:5] == 2'd2) ? (dither_q ? SKY3 : SKY2) :
@@ -841,7 +843,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         if (flash && active_q)
             rgb[5:4] = 2'b11;
     end
-    wire _unused = &{h[7], band[2:0], 1'b0};
+    wire _unused = &{u8[0], band[2:0], 1'b0};
 endmodule
 
 // ==========================================================================
