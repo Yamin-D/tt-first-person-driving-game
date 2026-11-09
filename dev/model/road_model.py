@@ -29,14 +29,14 @@ ROAD_EDGE, KERB_EDGE = 64, 72   # |p| thresholds (W/H = 1, kerb is w/8)
 
 # RGB222 colours, written RR_GG_BB
 def c(rr, gg, bb): return (rr << 4) | (gg << 2) | bb
-SKY      = [c(0,0,2), c(0,1,2), c(0,1,3), c(1,2,3)]   # bands of 32 rows
-MOUNTAIN = c(1,1,2)
-DASH_COL = c(1,0,1)
+SKY      = [c(0,0,1), c(1,0,2), c(3,1,1), c(3,2,0)]   # bands of 32 rows
+MOUNTAIN = c(1,0,1)
+DASH_COL = c(1,1,1)
 BAR_COL  = c(3,2,0)
 LINE_COL = c(3,3,3)
 TARMAC   = (c(1,1,1), c(2,2,2))     # (stripe=0, stripe=1)
 KERB     = (c(3,3,3), c(3,0,0))
-GRASS    = (c(0,2,0), c(0,3,0))
+GRASS    = (c(0,2,0), c(1,2,0))
 WHEEL0, WHEEL1 = c(0,0,0), c(2,2,2)
 
 # ---------------------------------------------------------------- divider
@@ -153,7 +153,7 @@ def render(car):
     img = np.zeros((H_SCREEN, W_SCREEN), dtype=np.uint8)
     x = np.arange(W_SCREEN)
     d_hi = car.D >> D_SHIFT                # 4 bits of distance
-    u = (x + car.h) & 0x7F                 # mountain column, wraps every 128 px
+    u = ((x + car.h) & 0xFF) >> 1          # mountain column, twice as wide: wraps every 256 px
     tri = np.where(u & 0x20, 31 - (u & 0x1F), u & 0x1F)        # 0..31 ramp
     mountain_h = tri + np.where(u & 0x40, tri >> 1, 0)          # alternate peaks
     bar = (x >= BAR_X0) & (x < BAR_X1)

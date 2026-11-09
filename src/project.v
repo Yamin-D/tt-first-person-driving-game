@@ -403,12 +403,12 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     output reg         [5:0]  rgb
 );
     // colours, RR_GG_BB
-    localparam [5:0] SKY0     = 6'b00_00_10;
-    localparam [5:0] SKY1     = 6'b00_01_10;
-    localparam [5:0] SKY2     = 6'b00_01_11;
-    localparam [5:0] SKY3     = 6'b01_10_11;
-    localparam [5:0] MOUNTAIN = 6'b01_01_10;
-    localparam [5:0] DASH_COL = 6'b01_00_01;
+    localparam [5:0] SKY0     = 6'b00_00_01;   // a sunset
+    localparam [5:0] SKY1     = 6'b01_00_10;
+    localparam [5:0] SKY2     = 6'b11_01_01;
+    localparam [5:0] SKY3     = 6'b11_10_00;
+    localparam [5:0] MOUNTAIN = 6'b01_00_01;
+    localparam [5:0] DASH_COL = 6'b01_01_01;
     localparam [5:0] BAR_COL  = 6'b11_10_00;
     localparam [5:0] LINE_COL = 6'b11_11_11;
     localparam [5:0] TARMAC0  = 6'b01_01_01;
@@ -416,7 +416,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     localparam [5:0] KERB0    = 6'b11_11_11;
     localparam [5:0] KERB1    = 6'b11_00_00;
     localparam [5:0] GRASS0   = 6'b00_10_00;
-    localparam [5:0] GRASS1   = 6'b00_11_00;
+    localparam [5:0] GRASS1   = 6'b01_10_00;
     localparam [5:0] WHEEL0   = 6'b00_00_00;
     localparam [5:0] WHEEL1   = 6'b10_10_10;
 
@@ -437,7 +437,8 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire       stripe = band[3] & (s_y[7:5] != 3'b000);  // no stripes for s_y < 32
 
     // ---- mountains: a triangle wave indexed by x + h, so they slide as you turn
-    wire [6:0] u      = x[6:0] + h[6:0];
+    wire [7:0] u8     = x[7:0] + h[7:0];
+    wire [6:0] u      = u8[7:1];                  // twice as wide: less toothy
     wire [4:0] tri_w  = u[5] ? ~u[4:0] : u[4:0];
     wire [5:0] mh     = {1'b0, tri_w} + (u[6] ? {2'b00, tri_w[4:1]} : 6'd0);
     wire       peak   = ({1'b0, ~y[6:0]} < {2'b00, mh});  // 127 - y < height
@@ -491,7 +492,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         else
             rgb = stripe ? GRASS1 : GRASS0;
     end
-    wire _unused = &{A[5:0], h[7], band[2:0], 1'b0};
+    wire _unused = &{A[5:0], u8[0], band[2:0], 1'b0};
 endmodule
 
 // ==========================================================================
