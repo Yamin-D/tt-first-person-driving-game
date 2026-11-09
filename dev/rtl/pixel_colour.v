@@ -219,12 +219,18 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
         s_slow_d <= s_slow;
         s_onc_d  <= s_onc;
     end
+    // Lamp columns are found in stage 1, next to each car's column offset.
     wire [7:0] h_w_slow = s_slow_d - {3'b000, s_slow_d[7:3]};
     wire [7:0] h_w_onc  = s_onc_d  - {3'b000, s_onc_d[7:3]};
-    car_shape shape_slow (.s(s_slow_d), .h_w(h_w_slow), .rows(rows_slow_q), .window(win_slow_q), .u(u_slow_q),
+    reg lamp_slow_q, lamp_onc_q;
+    always @(posedge clk) begin
+        lamp_slow_q <= (u_slow[7:0] < {3'b000, s_slow_d[7:3]}) | (u_slow[7:0] >= h_w_slow);
+        lamp_onc_q  <= (u_onc[7:0]  < {3'b000, s_onc_d[7:3]})  | (u_onc[7:0]  >= h_w_onc);
+    end
+    car_shape shape_slow (.s(s_slow_d), .lamp(lamp_slow_q), .rows(rows_slow_q), .window(win_slow_q), .u(u_slow_q),
                           .road_side(~left_q), .d(d_q), .col_a(col_a), .col_b(col_b_q),
                           .kind(slow_kind), .side(slow_side));
-    car_shape shape_onc  (.s(s_onc_d), .h_w(h_w_onc), .rows(rows_onc_q), .window(win_onc_q), .u(u_onc_q),
+    car_shape shape_onc  (.s(s_onc_d), .lamp(lamp_onc_q), .rows(rows_onc_q), .window(win_onc_q), .u(u_onc_q),
                           .road_side(left_q), .d(d_q), .col_a(col_a), .col_b(col_b_q),
                           .kind(onc_kind), .side(onc_side));
     always @(*) begin
