@@ -1,6 +1,6 @@
 // Steering wheel in the foreground, centred on column 320, row 448 (the screen
-// cuts off its lower part). Purely combinational: its result is registered as
-// part of stage 1 of pixel_colour.
+// cuts off its lower part). Its result is registered as part of stage 1 of
+// pixel_colour. The full version has one register stage of its own inside.
 //
 // The wheel angle w has five values, so there is no trigonometry:
 //   rim    two octagons, inside when a < R, b < R and a + b < sqrt(2) R,

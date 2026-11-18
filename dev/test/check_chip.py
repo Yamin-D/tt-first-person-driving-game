@@ -44,8 +44,8 @@ def pick_extremes(script, k=8):
     return sorted(i for _, i in sorted(scored)[-k:])
 
 def coverage_frames(script):
-    """First frame at each wheel angle and at top speed: the extreme values of
-    the wheel and the speed bar."""
+    """First frame for each coverage item: every wheel angle, top speed, both
+    curvature extremes, each car near, a crash and a score."""
     car = m.Car(); first = {}
     for i, keys in enumerate(script):
         car.frame(**keys)

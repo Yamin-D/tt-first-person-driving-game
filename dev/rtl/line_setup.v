@@ -3,8 +3,9 @@
 //        clock. It starts at x = 640 (after the visible pixels) and works out z
 //        for the NEXT line in 15 clocks; the quotient register then holds that z
 //        for the whole of the next line.
-//   A  = ((h - 320) << 6) + p * s_y, within 17 bits. Loaded at the end of the
-//        last sky row and then built by adding p once per road row.
+//   A  = ((h - 320) << 6) + p * s_y, within 17 bits, where p is the position
+//        counted double (P >>> 5). Loaded at x = 640 on row 127, then built by
+//        adding p once per road row.
 //   Ae = (A >>> 6) plus the curve offset kappa * z / 64, for the next line. Built
 //        in horizontal blanking with up to three shifted adds, after the divider
 //        has finished, so the pixel stage still needs one adder: x - centre = x + Ae.

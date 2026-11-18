@@ -6,7 +6,7 @@
 #   chip      whole chip from dev/rtl (both wheel versions), frames read from the VGA pins vs the model (Verilator)
 #   project   regenerate ../src/project.v from dev/rtl (the file Tiny Tapeout builds)
 #   check     src/project.v is up to date, and the whole-chip test passes on it
-#   area      cell area per block and % of a 1x1 tile (Yosys on GF180 cells)
+#   area      cell area per block and % of a 1x2 tile (Yosys on GF180 cells)
 #   sta       slow-corner setup timing estimate (OpenSTA)
 #   gl        gate-level simulation vs RTL, no X/Z on the outputs
 #   all       everything above except setup and model, in order

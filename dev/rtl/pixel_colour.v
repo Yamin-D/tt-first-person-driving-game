@@ -1,7 +1,8 @@
 // Colour of the pixel at (x, y), in two pipeline stages so that each clock
 // has only part of the work (the slow corner of GF180 needs this):
-//   stage 1  |x - centre|, the mountain test and the speed-bar test, registered
-//   stage 2  compare against the road widths and choose the colour
+//   stage 1  |x - centre|, each car's column offset, the mountain height, and the
+//            wheel, interior and score codes, registered
+//   stage 2  compare against the road, car and mountain limits and choose the colour
 // rgb therefore belongs to the pixel one clock earlier than (x, y); the top
 // level delays the syncs by the same clock. Per pixel there are only small
 // adders, comparators and multiplexers. rgb is {R1,R0,G1,G0,B1,B0}.
@@ -80,7 +81,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire [7:0] s_now = {~y[7], y[6:0]};               // the same one clock sooner
     wire [8:0] road_w = {s_y, 1'b0};                  // twice s_y
 
-    // ---- road geometry for this line (w = s_y)
+    // ---- road geometry for this line (half-width 2 s_y)
     wire [9:0] kerb_w = {1'b0, road_w} + {4'b0000, road_w[8:3]};
     wire [4:0] dash_w = {1'b0, road_w[8:5]} + 5'd1;
 
@@ -209,7 +210,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     always @(posedge clk)
         curved <= (kappa[2:0] ^ {3{kappa[3]}}) != 3'd0;
     wire near_horizon = (s_y[7:4] == 4'd0) & (~s_y[3] | (s_y[2:0] == 3'd0));
-    wire [1:0] slow_kind;       // 0 none, 1 body, 3 lamp
+    wire [1:0] slow_kind;       // 0 none, 1 body, 2 glass, 3 lamp
     wire [1:0] onc_kind;
     wire       slow_side, onc_side;
     // A dedicated copy of each car's size for the shape logic. The sizes only

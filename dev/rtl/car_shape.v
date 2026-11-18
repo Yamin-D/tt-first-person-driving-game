@@ -1,7 +1,7 @@
 // The shape of one upright car in the current row and column: a cuboid. s is
 // the car's base row. The road and cars are twice as wide as s, so S = 2 s and
-// every width is a shift: the rear face is S/2 = s wide, with lamps at the outer sixteenths and a window
-// band above them. The side panel lies just beyond the rear face and stops at
+// every width is a shift: the rear face is S/2 = s wide, with lamps in the outer
+// eighth at each end (found in pixel_colour) and a window band above them. The side panel lies just beyond the rear face and stops at
 // the road's ground line for this row, so it vanishes when the car is straight
 // ahead. Purely combinational, in stage 2 of pixel_colour.
 `default_nettype none

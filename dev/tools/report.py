@@ -5,10 +5,9 @@
     python3 dev/tools/report.py          both
 
 These run before place and route, so they are estimates. From this design's
-history: LibreLane adds about 10,000 um^2 (clock tree, buffers, tap cells) on
-a 1x1 tile, and routing made the slowest paths about 1.5x slower than the
-pre-route STA said. Keep the pre-route worst slack at +15 ns or more on the
-40 ns clock.
+history: LibreLane adds about 11,600 um^2 (clock tree, buffers, tap cells) on
+a 1x2 tile, and routing made the slowest paths about 1.5x slower than the
+pre-route STA said. Only the layout's own report gives the real timing.
 Needs dev/pdk (python3 dev/tools/setup_pdk.py) and yosys; `sta` needs the
 OpenSTA binary on PATH or in $STA.
 """
@@ -16,7 +15,7 @@ import os, re, shutil, subprocess, sys
 
 DEV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 SYNTH = os.path.join(DEV, "synth")
-TILE_UM2 = {"1x1": 346.64 * 160.72}
+TILE_UM2 = {"1x1": 346.64 * 160.72, "1x2": 346.64 * 325.36}
 
 def area():
     subprocess.run(["yosys", "-q", "-l", "synth.log", "synth.ys"], cwd=SYNTH, check=True,
@@ -35,7 +34,8 @@ def area():
             [part for part in name.replace("$paramod", "").split("\\") if part][0]
         print("%-20s %10.0f %10d" % (label, float(m.group(1)), ffs))
         if name == "design hierarchy":
-            print("= %.1f%% of a 1x1 GF180 tile (%.0f um^2)" % (100 * float(m.group(1)) / TILE_UM2["1x1"], TILE_UM2["1x1"]))
+            print("= %.1f%% of a 1x2 GF180 tile (%.0f um^2), before LibreLane's additions" %
+                  (100 * float(m.group(1)) / TILE_UM2["1x2"], TILE_UM2["1x2"]))
 
 def sta():
     exe = os.environ.get("STA") or shutil.which("sta") or os.path.expanduser("~/OpenSTA/build/sta")

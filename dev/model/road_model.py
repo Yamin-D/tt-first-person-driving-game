@@ -1,13 +1,13 @@
 """
-Stage 1 golden model for the Unichip driving sim (area-optimised layout).
+Golden model for the First Person Driving Game, the UniChip entry.
 
 Every quantity here is an integer with the same width and update order the
 Verilog uses, so frames rendered here are exactly what the chip draws.
 Run:  python3 road_model.py
 Outputs: frames.png (montage), drive.gif (short drive), engine.wav (sound)
 
-Screen layout: sky rows 0-127, horizon row 128, road rows 129-383,
-dashboard rows 352-479. These boundaries make s_y = y - 128 and most region
+Screen layout: sky rows 0-127, horizon row 128, road rows 129-351,
+dashboard rows 352-479 (the road logic runs to row 383 under the dashboard). These boundaries make s_y = y - 128 and most region
 tests plain bit slices in hardware.
 """
 import numpy as np
@@ -24,7 +24,7 @@ D_SHIFT  = 5            # stripes use D >> 5 (4 bits)
 FOG_SY   = 32           # no stripes for s_y < 32 (s_y[7:5] == 0)
 V_MAX    = 224
 WHEEL_FULL = True       # False: small wheel for 1x1, True: full wheel for 1x2
-ROAD_EDGE, KERB_EDGE = 64, 72   # |p| thresholds (W/H = 1, kerb is w/8)
+ROAD_EDGE, KERB_EDGE = 64, 72   # |p| thresholds (half-width 2 s_y, kerb is w/8)
 
 # curvature wanted in each of the 16 track segments (64 distance wraps each).
 # kappa is 4 bits; a negative value's magnitude is its bit inversion, so 5 and
@@ -82,8 +82,8 @@ LIMIT = 96             # |h| stops growing outwards beyond this
 P_LIMIT = 80           # and |p| beyond this
 
 def at_limit(value, step, limit=LIMIT):
-    """True if adding `step` would push `value` further past +/-96. The
-    hardware tests only the top three bits: value >= 96 or value <= -97."""
+    """True if adding `step` would push `value` further past +/-limit: 96 for
+    the heading (the hardware tests its top three bits) and 80 for position."""
     return (step > 0 and value >= limit) or (step < 0 and value <= -limit - 1)
 
 class Car:
@@ -113,8 +113,9 @@ class Car:
     def frame(self, left=0, right=0, accel=0, brake=0):
         """One update on the frame pulse. The speed change is worked out from
         the current state and applied with a single adder; the wheel, heading
-        and position then use the new speed. Heading and position stop moving
-        outwards past +/-96, which keeps every value inside its bit width."""
+        and position then use the new speed. Heading stops moving outwards past
+        +/-96 and position past +/-80, which keeps every value inside its bit
+        width."""
         self.cap_slow = base_row(self, self.slow) or self.cap_slow   # from the frame just drawn
         self.cap_onc = base_row(self, self.onc) or self.cap_onc
         if self.crash:
@@ -383,7 +384,7 @@ def render(car):
                     row[d < dash_w] = LINE_COL
                 draw_cars(row, d, dx < 0, s_y, car, bases)
                 img[y] = row
-        # end-of-line updates at x = 799
+        # per-line updates, at x = 640 in the hardware
         if y == HORIZON - 1:
             A = (car.h - 320) << 6         # centre offset folded into A
         elif HORIZON <= y < DASH_TOP:

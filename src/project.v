@@ -242,14 +242,14 @@ endmodule
 // car_state.v
 // ==========================================================================
 // Car state, updated once per frame on the frame pulse.
-//   v      speed, 0..192
+//   v      speed, 0..224
 //   wheel  wheel angle, -2..2, centres itself when no steering button is held
 //   h      heading in pixels (f * psi), stops growing past +/-96
 //   P      sideways position with 6 fraction bits; p = P >>> 6, road edge at |p| = 64,
-//          stops moving outwards past |p| = 96
+//          stops moving outwards past |p| = 80
 //   D      distance travelled, 9 bits, wraps (only its top bits are used)
 //   track  counts D wrapping; its top 4 bits are the track segment
-//   kappa  road curvature, moves one step towards the segment's value per wrap
+//   kappa  road curvature, moves one step towards the segment's value every 4 wraps
 //   slow, onc  depths of the slow and oncoming cars, 1 fraction bit, one shared adder
 //   crash  frames left of the crash stop; tens, ones  score, cars overtaken
 // Matches Car.frame() in road_model.py.
@@ -317,13 +317,16 @@ module car_state (
         else                      wheel1 = 3'sd0;
     end
 
-    // The update is spread over three clocks so each clock has one adder:
-    //   frame     speed, wheel and frame counter
+    // The update is spread over 7 clocks so each clock has at most one adder:
+    //   frame     speed, wheel and frame counter (or count down a crash stop)
     //   step_k    (the speed factor k is registered from the new speed)
     //   step_h    heading, from the registered speed factor and wheel
-    //   step_p    position and distance, from the registered heading
+    //   step_p    position, distance, track and curvature
+    //   step_s    slow car's depth, through the shared adder
+    //   step_o    oncoming car's depth; the score counts a pass
+    //   step_x    collision test
     // This gives exactly the same result as doing it all at once, in the same
-    // order as road_model.py, and it is all done within 4 clocks of the pulse.
+    // order as road_model.py.
     reg step_k, step_h, step_p, step_s, step_o, step_x;
     reg [5:0] crash;
     wire crashing = (crash != 6'd0);
@@ -381,7 +384,7 @@ module car_state (
         k2 <= v[7];               // v >= 128
     end
 
-    // limits: value >= 96 or value <= -97, from the top three bits only
+    // heading limits: value >= 96 or value <= -97, from the top three bits only
     function at_limit(input [2:0] top, input step_neg, input step_zero);
         at_limit = !step_zero && (step_neg ? (top == 3'b100) : (top == 3'b011));
     endfunction
@@ -395,7 +398,7 @@ module car_state (
     wire              h_stop = at_limit(h[7:5], steer[7], (steer == 8'sd0) || !(k1 || k2));
     wire signed [7:0] h1  = h_stop ? h : h + dh;
 
-    // position: P + h*k, held once |p| passes 96
+    // position: P + h*k, held once |p| passes 80
     wire signed [13:0] h14   = {{6{h[7]}}, h};
     wire signed [13:0] dP    = k2 ? (h14 <<< 1) : (k1 ? h14 : 14'sd0);
     wire               P_stop = !((h == 8'sd0) || !(k1 || k2)) &&
@@ -515,8 +518,9 @@ endmodule
 //        clock. It starts at x = 640 (after the visible pixels) and works out z
 //        for the NEXT line in 15 clocks; the quotient register then holds that z
 //        for the whole of the next line.
-//   A  = ((h - 320) << 6) + p * s_y, within 17 bits. Loaded at the end of the
-//        last sky row and then built by adding p once per road row.
+//   A  = ((h - 320) << 6) + p * s_y, within 17 bits, where p is the position
+//        counted double (P >>> 5). Loaded at x = 640 on row 127, then built by
+//        adding p once per road row.
 //   Ae = (A >>> 6) plus the curve offset kappa * z / 64, for the next line. Built
 //        in horizontal blanking with up to three shifted adds, after the divider
 //        has finished, so the pixel stage still needs one adder: x - centre = x + Ae.
@@ -638,8 +642,9 @@ endmodule
 // ==========================================================================
 // Colour of the pixel at (x, y), in two pipeline stages so that each clock
 // has only part of the work (the slow corner of GF180 needs this):
-//   stage 1  |x - centre|, the mountain test and the speed-bar test, registered
-//   stage 2  compare against the road widths and choose the colour
+//   stage 1  |x - centre|, each car's column offset, the mountain height, and the
+//            wheel, interior and score codes, registered
+//   stage 2  compare against the road, car and mountain limits and choose the colour
 // rgb therefore belongs to the pixel one clock earlier than (x, y); the top
 // level delays the syncs by the same clock. Per pixel there are only small
 // adders, comparators and multiplexers. rgb is {R1,R0,G1,G0,B1,B0}.
@@ -717,7 +722,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     wire [7:0] s_now = {~y[7], y[6:0]};               // the same one clock sooner
     wire [8:0] road_w = {s_y, 1'b0};                  // twice s_y
 
-    // ---- road geometry for this line (w = s_y)
+    // ---- road geometry for this line (half-width 2 s_y)
     wire [9:0] kerb_w = {1'b0, road_w} + {4'b0000, road_w[8:3]};
     wire [4:0] dash_w = {1'b0, road_w[8:5]} + 5'd1;
 
@@ -846,7 +851,7 @@ module pixel_colour #(parameter WHEEL_FULL = 0) (
     always @(posedge clk)
         curved <= (kappa[2:0] ^ {3{kappa[3]}}) != 3'd0;
     wire near_horizon = (s_y[7:4] == 4'd0) & (~s_y[3] | (s_y[2:0] == 3'd0));
-    wire [1:0] slow_kind;       // 0 none, 1 body, 3 lamp
+    wire [1:0] slow_kind;       // 0 none, 1 body, 2 glass, 3 lamp
     wire [1:0] onc_kind;
     wire       slow_side, onc_side;
     // A dedicated copy of each car's size for the shape logic. The sizes only
@@ -927,8 +932,8 @@ endmodule
 // steering_wheel.v
 // ==========================================================================
 // Steering wheel in the foreground, centred on column 320, row 448 (the screen
-// cuts off its lower part). Purely combinational: its result is registered as
-// part of stage 1 of pixel_colour.
+// cuts off its lower part). Its result is registered as part of stage 1 of
+// pixel_colour. The full version has one register stage of its own inside.
 //
 // The wheel angle w has five values, so there is no trigonometry:
 //   rim    two octagons, inside when a < R, b < R and a + b < sqrt(2) R,
@@ -1111,8 +1116,8 @@ endmodule
 // ==========================================================================
 // The shape of one upright car in the current row and column: a cuboid. s is
 // the car's base row. The road and cars are twice as wide as s, so S = 2 s and
-// every width is a shift: the rear face is S/2 = s wide, with lamps at the outer sixteenths and a window
-// band above them. The side panel lies just beyond the rear face and stops at
+// every width is a shift: the rear face is S/2 = s wide, with lamps in the outer
+// eighth at each end (found in pixel_colour) and a window band above them. The side panel lies just beyond the rear face and stops at
 // the road's ground line for this row, so it vanishes when the car is straight
 // ahead. Purely combinational, in stage 2 of pixel_colour.
 
@@ -1154,8 +1159,8 @@ endmodule
 // Engine sound. A phase accumulator steps once per line (31.25 kHz) with a step
 // that rises with speed: inc = (v + 32) << 2 gives about 61 Hz idling, 488 Hz at
 // top speed. The sample is a sawtooth plus a square an octave below, roughened by
-// a little LFSR noise on half of each cycle. Off the road, more noise is mixed in
-// for a gravel rumble. The output pin is PWM: high
+// a little LFSR noise on half of each cycle. Off the road or in a crash (the top
+// level ORs the two), more noise is mixed in for a gravel rumble. The output pin is PWM: high
 // while the low 8 bits of the VGA x counter are below the sample, which gives
 // a 98 kHz carrier with no counter of its own.
 

@@ -1,8 +1,8 @@
 // Engine sound. A phase accumulator steps once per line (31.25 kHz) with a step
 // that rises with speed: inc = (v + 32) << 2 gives about 61 Hz idling, 488 Hz at
 // top speed. The sample is a sawtooth plus a square an octave below, roughened by
-// a little LFSR noise on half of each cycle. Off the road, more noise is mixed in
-// for a gravel rumble. The output pin is PWM: high
+// a little LFSR noise on half of each cycle. Off the road or in a crash (the top
+// level ORs the two), more noise is mixed in for a gravel rumble. The output pin is PWM: high
 // while the low 8 bits of the VGA x counter are below the sample, which gives
 // a 98 kHz carrier with no counter of its own.
 `default_nettype none

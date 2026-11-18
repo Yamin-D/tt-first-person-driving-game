@@ -1,12 +1,12 @@
 // Car state, updated once per frame on the frame pulse.
-//   v      speed, 0..192
+//   v      speed, 0..224
 //   wheel  wheel angle, -2..2, centres itself when no steering button is held
 //   h      heading in pixels (f * psi), stops growing past +/-96
 //   P      sideways position with 6 fraction bits; p = P >>> 6, road edge at |p| = 64,
-//          stops moving outwards past |p| = 96
+//          stops moving outwards past |p| = 80
 //   D      distance travelled, 9 bits, wraps (only its top bits are used)
 //   track  counts D wrapping; its top 4 bits are the track segment
-//   kappa  road curvature, moves one step towards the segment's value per wrap
+//   kappa  road curvature, moves one step towards the segment's value every 4 wraps
 //   slow, onc  depths of the slow and oncoming cars, 1 fraction bit, one shared adder
 //   crash  frames left of the crash stop; tens, ones  score, cars overtaken
 // Matches Car.frame() in road_model.py.
@@ -75,13 +75,16 @@ module car_state (
         else                      wheel1 = 3'sd0;
     end
 
-    // The update is spread over three clocks so each clock has one adder:
-    //   frame     speed, wheel and frame counter
+    // The update is spread over 7 clocks so each clock has at most one adder:
+    //   frame     speed, wheel and frame counter (or count down a crash stop)
     //   step_k    (the speed factor k is registered from the new speed)
     //   step_h    heading, from the registered speed factor and wheel
-    //   step_p    position and distance, from the registered heading
+    //   step_p    position, distance, track and curvature
+    //   step_s    slow car's depth, through the shared adder
+    //   step_o    oncoming car's depth; the score counts a pass
+    //   step_x    collision test
     // This gives exactly the same result as doing it all at once, in the same
-    // order as road_model.py, and it is all done within 4 clocks of the pulse.
+    // order as road_model.py.
     reg step_k, step_h, step_p, step_s, step_o, step_x;
     reg [5:0] crash;
     wire crashing = (crash != 6'd0);
@@ -139,7 +142,7 @@ module car_state (
         k2 <= v[7];               // v >= 128
     end
 
-    // limits: value >= 96 or value <= -97, from the top three bits only
+    // heading limits: value >= 96 or value <= -97, from the top three bits only
     function at_limit(input [2:0] top, input step_neg, input step_zero);
         at_limit = !step_zero && (step_neg ? (top == 3'b100) : (top == 3'b011));
     endfunction
@@ -153,7 +156,7 @@ module car_state (
     wire              h_stop = at_limit(h[7:5], steer[7], (steer == 8'sd0) || !(k1 || k2));
     wire signed [7:0] h1  = h_stop ? h : h + dh;
 
-    // position: P + h*k, held once |p| passes 96
+    // position: P + h*k, held once |p| passes 80
     wire signed [13:0] h14   = {{6{h[7]}}, h};
     wire signed [13:0] dP    = k2 ? (h14 <<< 1) : (k1 ? h14 : 14'sd0);
     wire               P_stop = !((h == 8'sd0) || !(k1 || k2)) &&
