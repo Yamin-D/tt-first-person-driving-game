@@ -20,6 +20,7 @@ This repository holds two complete versions of the game, each on its own branch.
 | Cockpit | Roof, left pillar, side window, mirror, dashboard with console, large wheel | Dashboard, small wheel, speed bar |
 | Scene | Sunset with a checkerboard between its bands, mountains | Sunset, mountains |
 | Sound | Engine with speed-dependent pitch and a rough edge, gravel noise | The same |
+| Controls | Switches, or an SNES-style controller through the TT Gamepad Pmod | Switches |
 
 The clips above are rendered from the bit-exact Python model of each design, so they show what the chip draws.
 
@@ -67,9 +68,9 @@ From the Tiny Tapeout layout builds on GF180 at 25 MHz:
 
 | | 1x2 version | 1x1 version |
 |---|---|---|
-| Cell area before place and route | 80,384 µm² | 34,162 µm² |
-| Core utilisation | 84.6% | 83.9% |
-| Worst setup slack, slow corner | +3.07 ns | +6.04 ns |
+| Cell area before place and route | 82,858 µm² | 34,162 µm² |
+| Core utilisation | 87.8% | 83.9% |
+| Worst setup slack, slow corner | +2.52 ns | +6.04 ns |
 | Setup and hold violations | 0 | 0 |
 | DRC, LVS and antenna errors | 0 | 0 |
 
