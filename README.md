@@ -83,6 +83,7 @@ Connect a VGA monitor through a Tiny VGA PMOD on the output pins, and the TT Aud
 | `ui[1]` | Steer right |
 | `ui[2]` | Accelerate |
 | `ui[3]` | Brake |
+| `ui[4]`–`ui[6]` | TT Gamepad Pmod (SNES-style controller): D-pad steers, B or Up accelerates, Y or Down brakes |
 
 ## About Tiny Tapeout
 

@@ -14,7 +14,7 @@ OBJ = os.path.join(BUILD, "obj_chip")
 os.makedirs(BUILD, exist_ok=True)
 
 srcs = [os.path.join(ROOT, "rtl", f) for f in
-        ["project.v", "vga_timing.v", "ip_input_sync.v", "car_state.v",
+        ["project.v", "vga_timing.v", "ip_input_sync.v", "gamepad.v", "car_state.v",
          "line_setup.v", "pixel_colour.v", "steering_wheel.v", "interior.v", "score_display.v", "car_shape.v", "engine_audio.v"]]
 if os.environ.get("ROAD_SRC") == "project":       # test the generated src/project.v
     import re

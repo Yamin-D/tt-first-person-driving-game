@@ -27,9 +27,9 @@ pinout:
   ui[1]: "Steer right"
   ui[2]: "Accelerate"
   ui[3]: "Brake"
-  ui[4]: ""
-  ui[5]: ""
-  ui[6]: ""
+  ui[4]: "Gamepad Pmod latch"
+  ui[5]: "Gamepad Pmod clock"
+  ui[6]: "Gamepad Pmod data"
   ui[7]: ""
 
   # Outputs

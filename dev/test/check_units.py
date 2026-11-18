@@ -66,6 +66,30 @@ for l in lines:
 print("curve:     %d rows checked, %d mismatches" % (len(lines), bad))
 failures += bad + (len(lines) != 3 * 3 * 16 * 255)
 
+# ---- gamepad: random packets for one or two controllers, at several Pmod clock rates
+import random
+def gamepad_keys(bits):
+    """Last 12 bits are controller 1: B Y Select Start Up Down Left Right A X L R."""
+    last = bits[-12:]
+    if all(last):
+        return 0                                   # no controller
+    b, y, _sel, _st, up, down, left, right = last[:8]
+    return ((y | down) << 3) | ((b | up) << 2) | (right << 1) | left
+rng = random.Random(7); packets = []
+for i in range(400):
+    n = rng.choice((12, 24)); half = rng.choice((1, 2, 3, 8))
+    bits = [rng.random() < 0.3 for _ in range(n)]
+    if i % 25 == 0: bits = [1] * n                 # absent
+    if i % 25 == 1: bits = [0] * n                 # present, nothing pressed
+    packets.append((n, half, [int(b) for b in bits]))
+with open(os.path.join(BUILD, "gamepad_vectors.txt"), "w") as f:
+    for n, half, bits in packets:
+        f.write("%d %d %s\n" % (n, half, "".join(map(str, bits)).rjust(24, "0")))
+hw = [int(l) for l in run("tb_gamepad", ["gamepad.v"])]
+bad = sum(h != gamepad_keys(b) for h, (n, half, b) in zip(hw, packets)) + abs(len(hw) - len(packets))
+print("gamepad:   %d packets, %d mismatches" % (len(hw), bad))
+failures += bad
+
 # ---- audio: speeds from the random script, including off-road stretches
 car = m.Car(); speeds = []; offs = []
 for keys in m.random_script(600):           # off-road from frame 356

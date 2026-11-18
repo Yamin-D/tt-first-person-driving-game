@@ -15,7 +15,7 @@ REPO = os.path.join(DEV, "..")
 RTL = os.path.join(DEV, "rtl")
 OUT = os.path.join(REPO, "src", "project.v")
 DEV_TOP = "tt_um_road_racer"
-ORDER = ["project.v", "vga_timing.v", "ip_input_sync.v", "car_state.v",
+ORDER = ["project.v", "vga_timing.v", "ip_input_sync.v", "gamepad.v", "car_state.v",
          "line_setup.v", "pixel_colour.v", "steering_wheel.v", "interior.v", "score_display.v", "car_shape.v", "engine_audio.v"]
 
 def top_module_from_info():

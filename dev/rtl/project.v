@@ -3,6 +3,7 @@
  * with curved roads, traffic, crashes, a score, a car interior and engine sound.
  *
  * Inputs : ui_in[0] left, ui_in[1] right, ui_in[2] accelerate, ui_in[3] brake
+ *          ui_in[4..6] = TT Gamepad Pmod latch, clock, data (SNES controller)
  * Outputs: uo_out = Tiny VGA Pmod (RGB222 + syncs)
  *          uio[7] = audio (PWM; the TT Audio Pmod pin, or an RC filter and amplifier)
  *
@@ -38,8 +39,16 @@ module tt_um_road_racer #(
     );
 
     // ---- buttons
-    wire [3:0] btn;
-    ip_input_sync #(.N(4)) sync (.clk(clk), .in(ui_in[3:0]), .out(btn));
+    wire [3:0] btn_sw;
+    ip_input_sync #(.N(4)) sync (.clk(clk), .in(ui_in[3:0]), .out(btn_sw));
+
+    // ---- or a gamepad: D-pad left and right steer, B or Up accelerates, Y or Down brakes
+    wire [3:0] btn_pad;
+    gamepad pad (
+        .clk(clk), .rst_n(rst_q), .pmod_latch(ui_in[4]), .pmod_clk(ui_in[5]),
+        .pmod_data(ui_in[6]), .keys(btn_pad)
+    );
+    wire [3:0] btn = btn_sw | btn_pad;
 
     // ---- car state, once per frame
     wire        [7:0] v;
@@ -105,5 +114,5 @@ module tt_um_road_racer #(
     assign uio_out = {audio, 7'b0000000};     // uio[7]: Tiny Tapeout's audio pin
     assign uio_oe  = 8'b1000_0000;
 
-    wire _unused = &{p, ena, uio_in, ui_in[7:4], D[4:0], z[10:4], slow[0], onc[0], frame, sample, 1'b0};
+    wire _unused = &{p, ena, uio_in, ui_in[7], D[4:0], z[10:4], slow[0], onc[0], frame, sample, 1'b0};
 endmodule

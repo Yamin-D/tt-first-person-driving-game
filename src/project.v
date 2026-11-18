@@ -9,6 +9,7 @@
  * with curved roads, traffic, crashes, a score, a car interior and engine sound.
  *
  * Inputs : ui_in[0] left, ui_in[1] right, ui_in[2] accelerate, ui_in[3] brake
+ *          ui_in[4..6] = TT Gamepad Pmod latch, clock, data (SNES controller)
  * Outputs: uo_out = Tiny VGA Pmod (RGB222 + syncs)
  *          uio[7] = audio (PWM; the TT Audio Pmod pin, or an RC filter and amplifier)
  *
@@ -43,8 +44,16 @@ module tt_um_yamin_d_first_person_driving_game #(
     );
 
     // ---- buttons
-    wire [3:0] btn;
-    ip_input_sync #(.N(4)) sync (.clk(clk), .in(ui_in[3:0]), .out(btn));
+    wire [3:0] btn_sw;
+    ip_input_sync #(.N(4)) sync (.clk(clk), .in(ui_in[3:0]), .out(btn_sw));
+
+    // ---- or a gamepad: D-pad left and right steer, B or Up accelerates, Y or Down brakes
+    wire [3:0] btn_pad;
+    gamepad pad (
+        .clk(clk), .rst_n(rst_q), .pmod_latch(ui_in[4]), .pmod_clk(ui_in[5]),
+        .pmod_data(ui_in[6]), .keys(btn_pad)
+    );
+    wire [3:0] btn = btn_sw | btn_pad;
 
     // ---- car state, once per frame
     wire        [7:0] v;
@@ -110,7 +119,7 @@ module tt_um_yamin_d_first_person_driving_game #(
     assign uio_out = {audio, 7'b0000000};     // uio[7]: Tiny Tapeout's audio pin
     assign uio_oe  = 8'b1000_0000;
 
-    wire _unused = &{p, ena, uio_in, ui_in[7:4], D[4:0], z[10:4], slow[0], onc[0], frame, sample, 1'b0};
+    wire _unused = &{p, ena, uio_in, ui_in[7], D[4:0], z[10:4], slow[0], onc[0], frame, sample, 1'b0};
 endmodule
 
 // ==========================================================================
@@ -173,6 +182,60 @@ module ip_input_sync #(
         s2 <= s1;
     end
     assign out = s2;
+endmodule
+
+// ==========================================================================
+// gamepad.v
+// ==========================================================================
+// The Tiny Tapeout Gamepad Pmod on ui[4] latch, ui[5] clock, ui[6] data,
+// following TinyTapeout/vga-playground's gamepad_pmod.v (Pat Deegan, Apache-2.0).
+// The Pmod shifts out 12 bits per controller on rising clock edges and pulses
+// latch when done; the last 12 bits are controller 1, in the order
+// B, Y, Select, Start, Up, Down, Left, Right, A, X, L, R, active high. All ones
+// means no controller. Only the four game controls are kept:
+//   left = Left, right = Right, accelerate = B or Up, brake = Y or Down.
+
+module gamepad (
+    input  wire       clk,
+    input  wire       rst_n,
+    input  wire       pmod_latch,
+    input  wire       pmod_clk,
+    input  wire       pmod_data,
+    output reg  [3:0] keys          // {brake, accelerate, right, left}
+);
+    // two-flop synchronisers, plus the previous value for edge detection
+    reg [1:0] data_s, clk_s, latch_s;
+    reg       clk_prev, latch_prev;
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            data_s     <= 2'b00;
+            clk_s      <= 2'b00;
+            latch_s    <= 2'b00;
+            clk_prev   <= 1'b0;
+            latch_prev <= 1'b0;
+        end else begin
+            data_s     <= {data_s[0],  pmod_data};
+            clk_s      <= {clk_s[0],   pmod_clk};
+            latch_s    <= {latch_s[0], pmod_latch};
+            clk_prev   <= clk_s[1];
+            latch_prev <= latch_s[1];
+        end
+    end
+
+    // no reset: only read at a latch, after a full packet has shifted in
+    reg [11:0] shift;
+    always @(posedge clk)
+        if (clk_s[1] & ~clk_prev)
+            shift <= {shift[10:0], data_s[1]};
+
+    wire absent = &shift;
+    always @(posedge clk) begin
+        if (!rst_n)
+            keys <= 4'b0000;
+        else if (latch_s[1] & ~latch_prev)
+            keys <= absent ? 4'b0000 :
+                    {shift[10] | shift[6], shift[11] | shift[7], shift[4], shift[5]};
+    end
 endmodule
 
 // ==========================================================================

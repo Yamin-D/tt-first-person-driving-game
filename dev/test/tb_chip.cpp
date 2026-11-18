@@ -39,11 +39,31 @@ int main(int argc, char **argv) {
     int cx = 0, cy = 0, frame = 0;
     int px = -1, py = -1, pf = -1;          // counters one clock earlier
     while (frame <= last + 1) {
-        if (cx == 0 && cy == 0) {
+        {
+            // Each frame's buttons arrive either on the switches (ui_in[3:0]) or as
+            // a Gamepad Pmod packet sent on rows 100-101, cycling through four ways:
+            //   0 switches, gamepad present with nothing pressed
+            //   1 gamepad only (B and Y for accelerate and brake)
+            //   2 gamepad only, two-controller packet (Up and Down)
+            //   3 switches, gamepad absent (all ones)
             int k = frame < (int)keys.size() ? keys[frame] : 0;
-            // ui_in[0]=left [1]=right [2]=accel [3]=brake; script bits are L R A B
-            top->ui_in = ((k >> 3) & 1) | (((k >> 2) & 1) << 1) |
-                         (((k >> 1) & 1) << 2) | ((k & 1) << 3);
+            int L = (k >> 3) & 1, R = (k >> 2) & 1, A = (k >> 1) & 1, B = k & 1;
+            int mode = frame & 3;
+            int sw = (mode == 0 || mode == 3) ? (L | (R << 1) | (A << 2) | (B << 3)) : 0;
+            int pad[24] = {0};
+            int n = (mode == 2) ? 24 : 12, base = n - 12;    // controller 1 = last 12 bits
+            for (int i = 0; i < base; i++) pad[i] = (i * 7 + frame) % 3 == 0;
+            if (mode == 1) { pad[base + 0] = A; pad[base + 1] = B; }
+            if (mode == 2) { pad[base + 4] = A; pad[base + 5] = B; }
+            if (mode == 1 || mode == 2) { pad[base + 6] = L; pad[base + 7] = R; }
+            if (mode == 3) for (int i = 0; i < n; i++) pad[i] = 1;
+            int latch = 0, pclk = 0, data = 0;
+            if (cy == 100 || cy == 101) {
+                int t = (cy - 100) * 800 + cx, bit = t / 16, ph = t % 16;
+                if (bit < n) { data = pad[bit]; pclk = ph >= 8; }
+                else if (bit == n) latch = ph >= 8;
+            }
+            top->ui_in = sw | (latch << 4) | (pclk << 5) | (data << 6);
         }
         top->clk = 1; top->eval();
         // after this edge the pins show the pixel the counters were at one

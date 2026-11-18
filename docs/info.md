@@ -62,13 +62,17 @@ frame against it from the VGA pins.
 4. Inputs (active high): ui[0] steer left, ui[1] steer right, ui[2] accelerate,
    ui[3] brake. On the Tiny Tapeout demo board these are the input DIP switches:
    switch one on to hold that control and off to release it. Push buttons wired
-   to the input pins also work. The number on the dashboard is your score, the
-   cars overtaken, and the engine note rises with your speed.
+   to the input pins also work. Or plug the TT Gamepad Pmod into the input
+   pins with an SNES-style controller: the D-pad steers left and right, B or Up
+   accelerates, and Y or Down brakes. The switches and the gamepad work together.
+   The number on the dashboard is your score, the cars overtaken, and the engine
+   note rises with your speed.
 
 ## External hardware
 
 - Tiny VGA PMOD (or any RGB222 VGA adapter with the standard Tiny Tapeout pinout)
   on uo[7:0]
 - The demo board's input switches, or four push buttons on ui[3:0] (active high)
+- Optional: TT Gamepad Pmod with an SNES-style controller on ui[4:6]
 - TT Audio Pmod on the bidirectional pins, or a speaker or headphones with an RC
   low-pass filter and amplifier on uio[7]
