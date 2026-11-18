@@ -54,17 +54,21 @@ frame against it from the VGA pins.
 
 ## How to test
 
-1. Connect a VGA monitor through a Tiny VGA PMOD on the output pins, and an
-   amplified speaker (through a simple RC low-pass filter) on uio[0].
+1. Connect a VGA monitor through a Tiny VGA Pmod on the output pins. For sound,
+   plug the TT Audio Pmod into the bidirectional pins, or connect an amplified
+   speaker through a simple RC low-pass filter to uio[7].
 2. Set the clock to 25 MHz (25.175 MHz is the ideal VGA value; both work).
 3. Hold rst_n low for a few clocks, then release it.
 4. Inputs (active high): ui[0] steer left, ui[1] steer right, ui[2] accelerate,
-   ui[3] brake. The number on the dashboard is your score, the cars overtaken.
-   The engine note rises with your speed.
+   ui[3] brake. On the Tiny Tapeout demo board these are the input DIP switches:
+   switch one on to hold that control and off to release it. Push buttons wired
+   to the input pins also work. The number on the dashboard is your score, the
+   cars overtaken, and the engine note rises with your speed.
 
 ## External hardware
 
 - Tiny VGA PMOD (or any RGB222 VGA adapter with the standard Tiny Tapeout pinout)
   on uo[7:0]
-- Four push buttons on ui[3:0] (active high)
-- Speaker or headphones with an RC low-pass filter and amplifier on uio[0]
+- The demo board's input switches, or four push buttons on ui[3:0] (active high)
+- TT Audio Pmod on the bidirectional pins, or a speaker or headphones with an RC
+  low-pass filter and amplifier on uio[7]

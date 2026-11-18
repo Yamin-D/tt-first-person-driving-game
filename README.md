@@ -75,7 +75,7 @@ From the Tiny Tapeout layout builds on GF180 at 25 MHz:
 
 ## Playing it
 
-Connect a VGA monitor through a Tiny VGA PMOD on the output pins, and an amplified speaker through an RC low-pass filter on `uio[0]`. Clock the chip at 25 MHz.
+Connect a VGA monitor through a Tiny VGA PMOD on the output pins, and the TT Audio Pmod (audio on `uio[7]`), or an amplified speaker through an RC low-pass filter on `uio[7]`. Clock the chip at 25 MHz.
 
 | Input | Control |
 |---|---|

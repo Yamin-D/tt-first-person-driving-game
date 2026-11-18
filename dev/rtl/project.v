@@ -1,12 +1,12 @@
 /*
- * Road racer, stage 1: pseudo-3D road with speed, steering and heading,
- * distant mountains, a speed bar and engine sound.
+ * First Person Driving Game: a pseudo-3D driving game drawn straight to VGA,
+ * with curved roads, traffic, crashes, a score, a car interior and engine sound.
  *
  * Inputs : ui_in[0] left, ui_in[1] right, ui_in[2] accelerate, ui_in[3] brake
- * Outputs: uo_out = Tiny VGA PMOD (RGB222 + syncs)
- *          uio[0] = audio (PWM, needs an RC filter on real hardware)
+ * Outputs: uo_out = Tiny VGA Pmod (RGB222 + syncs)
+ *          uio[7] = audio (PWM; the TT Audio Pmod pin, or an RC filter and amplifier)
  *
- * Rename the module to tt_um_<your GitHub username>_... before pushing.
+ * dev/tools/combine.py renames this module to info.yaml's top_module.
  */
 `default_nettype none
 
@@ -102,8 +102,8 @@ module tt_um_road_racer #(
     end
 
     assign uo_out  = vga_out;
-    assign uio_out = {7'b0000000, audio};
-    assign uio_oe  = 8'b0000_0001;
+    assign uio_out = {audio, 7'b0000000};     // uio[7]: Tiny Tapeout's audio pin
+    assign uio_oe  = 8'b1000_0000;
 
     wire _unused = &{p, ena, uio_in, ui_in[7:4], D[4:0], z[10:4], slow[0], onc[0], frame, sample, 1'b0};
 endmodule

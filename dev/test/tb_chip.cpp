@@ -53,7 +53,7 @@ int main(int argc, char **argv) {
             int hs = (uo >> 7) & 1, vs = (uo >> 3) & 1;
             if (hs != !(px >= 656 && px < 752)) sync_errors++;
             if (vs != !(py >= 490 && py < 492)) sync_errors++;
-            if (top->uio_oe != 0x01) oe_errors++;
+            if (top->uio_oe != 0x80) oe_errors++;
             if (px < 640 && py < 480 && want.count(pf)) {
                 int r = ((uo >> 0) & 1) << 1 | ((uo >> 4) & 1);
                 int g = ((uo >> 1) & 1) << 1 | ((uo >> 5) & 1);

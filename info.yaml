@@ -1,9 +1,9 @@
 # Tiny Tapeout project information
 project:
   title:        "First Person Driving Game"      # Project title
-  author:       "Yamin"      # Your name
+  author:       "Yamin Dahwich"      # Your name
   discord:      ""      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
-  description:  "First-person pseudo-3D driving game"      # One line description of what your project does
+  description:  "First-person pseudo-3D driving game on VGA, with curved roads, traffic and engine sound"      # One line description of what your project does
   language:     "Verilog" # other examples include SystemVerilog, Amaranth, VHDL, etc
   clock_hz:     25000000       # Clock frequency in Hz (or 0 if not applicable)
 
@@ -43,14 +43,14 @@ pinout:
   uo[7]: "HSync"
 
   # Bidirectional pins
-  uio[0]: "Audio (PWM)"
+  uio[0]: ""
   uio[1]: ""
   uio[2]: ""
   uio[3]: ""
   uio[4]: ""
   uio[5]: ""
   uio[6]: ""
-  uio[7]: ""
+  uio[7]: "Audio (PWM)"
 
 # Do not change!
 yaml_version: 6
